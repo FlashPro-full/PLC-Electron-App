@@ -1,0 +1,80 @@
+{
+  "name": "plc-ts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PLC conveyor desktop (TypeScript + Electron)",
+  "author": "PLC",
+  "main": "dist/electron/main.js",
+  "scripts": {
+    "build:public": "node scripts/build-public.mjs && node scripts/bundle-client.mjs",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "build": "npm run build:public && npm run build:server && npm run build:electron",
+    "start": "node dist/server/main.js",
+    "dev": "tsx src/server/main.ts",
+    "electron": "npm run build && electron .",
+    "electron:dev": "npm run build:public && npm run build:server && npm run build:electron && concurrently -k \"cross-env PLC_APP_ROOT=.. tsx src/server/main.ts\" \"wait-on tcp:127.0.0.1:5000 && cross-env PLC_ELECTRON_EXTERNAL_SERVER=1 NODE_ENV=development electron .\"",
+    "pack:win": "node scripts/ensure-template-db.mjs && npm run build && electron-builder --win --x64"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "modbus-serial": "^8.0.17",
+    "socket.io": "^4.7.5"
+  },
+  "optionalDependencies": {
+    "node-global-key-listener": "^0.3.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "concurrently": "^9.0.1",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.plc.conveyor.desktop",
+    "productName": "PLC Conveyor",
+    "copyright": "Copyright © PLC",
+    "directories": {
+      "output": "out"
+    },
+    "files": [
+      "dist/**/*",
+      "public/**/*",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/better-sqlite3/**/*"
+    ],
+    "npmRebuild": false,
+    "extraFiles": [
+      {
+        "from": "packaging/plc.sqlite",
+        "to": "data/plc.sqlite"
+      }
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "dir",
+          "arch": ["x64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64"]
+        }
+      ]
+    }
+  }
+}
