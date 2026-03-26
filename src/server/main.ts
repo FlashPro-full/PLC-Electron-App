@@ -1,9 +1,9 @@
 import dotenv from "dotenv";
 import path from "path";
-import { createPlcHttpServer } from "./httpServer";
-import { ensureSettingsFile } from "./ensureSettings";
-import { ensureSqlite } from "./settingsDb";
-import { isPlcConnected } from "./plc";
+import { createHttpServer } from "./http/httpServer";
+import { ensureBeltSettingsFile } from "./persistence/beltSettings";
+import { ensureDeviceSettingsFile } from "./persistence/deviceSettings";
+import { ensurePurescanSettingsFile } from "./persistence/purescanSettings";
 
 function resolveRoot(): string {
   return process.env.PLC_APP_ROOT || process.cwd();
@@ -13,20 +13,23 @@ const root = resolveRoot();
 process.chdir(root);
 dotenv.config({ path: path.join(root, ".env") });
 
-ensureSettingsFile();
-ensureSqlite();
+const clientDir = path.join(__dirname, "..", "..", "dist", "client");
+const host = "127.0.0.1";
+const port = 5049;
 
-const publicDir = path.join(__dirname, "..", "..", "public");
-const host = process.env.FLASK_HOST || "0.0.0.0";
-const port = parseInt(process.env.FLASK_PORT || process.env.PLC_PORT || "5000", 10);
+ensureBeltSettingsFile();
+ensureDeviceSettingsFile();
+ensurePurescanSettingsFile();
 
 export async function runServer(): Promise<void> {
-  const { start } = createPlcHttpServer(publicDir);
+  const { server } = createHttpServer(clientDir);
 
-  await start(port, host);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, host, () => resolve());
+  });
 
-  console.log(`PLC-TS listening on http://${host}:${port}`);
-  console.log(`plc connected: ${isPlcConnected()}`);
+  console.log(`Belt-System listening on http://${host}:${port}`);
 }
 
 if (require.main === module) {

@@ -6,61 +6,81 @@
   "author": "PLC",
   "main": "dist/electron/main.js",
   "scripts": {
-    "build:public": "node scripts/build-public.mjs && node scripts/bundle-client.mjs",
+    "build:client": "vite build --config src/client/vite.config.ts",
     "build:server": "tsc -p tsconfig.server.json",
     "build:electron": "tsc -p tsconfig.electron.json",
-    "build": "npm run build:public && npm run build:server && npm run build:electron",
+    "build": "npm run build:client && npm run build:server && npm run build:electron",
     "start": "node dist/server/main.js",
     "dev": "tsx src/server/main.ts",
     "electron": "npm run build && electron .",
-    "electron:dev": "npm run build:public && npm run build:server && npm run build:electron && concurrently -k \"cross-env PLC_APP_ROOT=.. tsx src/server/main.ts\" \"wait-on tcp:127.0.0.1:5000 && cross-env PLC_ELECTRON_EXTERNAL_SERVER=1 NODE_ENV=development electron .\"",
-    "pack:win": "node scripts/ensure-template-db.mjs && npm run build && electron-builder --win --x64"
+    "dev:client": "vite --config src/client/vite.config.ts",
+    "electron:dev": "npm run build:client && npm run build:server && npm run build:electron && concurrently -k \"cross-env PLC_APP_ROOT=.. tsx src/server/main.ts\" \"wait-on tcp:127.0.0.1:5049 && cross-env PLC_ELECTRON_EXTERNAL_SERVER=1 NODE_ENV=development electron .\"",
+    "rebuild:electron": "electron-rebuild -f -t prod",
+    "postinstall": "node scripts/patch-node-gyp-vs18.mjs",
+    "pack:win": "npm run build && electron-builder --win --x64"
   },
   "dependencies": {
-    "better-sqlite3": "^11.8.1",
+    "@serialport/bindings-cpp": "^13.0.1",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
+    "lucide-react": "^1.6.0",
     "modbus-serial": "^8.0.17",
-    "socket.io": "^4.7.5"
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.0.2",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.8.1",
+    "three": "^0.172.0"
   },
   "optionalDependencies": {
     "node-global-key-listener": "^0.3.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
+    "@electron/rebuild": "^3.7.1",
+    "@tailwindcss/postcss": "^4.2.2",
     "@types/express": "^4.17.21",
     "@types/node": "^20.14.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.0.1",
     "cross-env": "^7.0.3",
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8",
     "esbuild": "^0.24.0",
+    "postcss": "^8.5.8",
+    "tailwindcss": "^4.2.2",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
+    "vite": "^6.0.3",
     "wait-on": "^8.0.1"
   },
   "build": {
     "appId": "com.plc.conveyor.desktop",
     "productName": "PLC Conveyor",
     "copyright": "Copyright © PLC",
+    "icon": "icon",
     "directories": {
       "output": "out"
     },
     "files": [
       "dist/**/*",
-      "public/**/*",
       "package.json",
       "node_modules/**/*"
     ],
     "asar": true,
     "asarUnpack": [
-      "**/node_modules/better-sqlite3/**/*"
+      "**/node_modules/@serialport/bindings-cpp/**/*"
     ],
-    "npmRebuild": false,
+    "npmRebuild": true,
     "extraFiles": [
       {
-        "from": "packaging/plc.sqlite",
-        "to": "data/plc.sqlite"
+        "from": "device.json",
+        "to": "device.json"
+      },
+      {
+        "from": "purescan.json",
+        "to": "purescan.json"
       }
     ],
     "win": {
@@ -68,11 +88,15 @@
       "target": [
         {
           "target": "dir",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     }

@@ -2,8 +2,10 @@ import { app, BrowserWindow, dialog, Menu } from "electron";
 import * as path from "path";
 import * as net from "net";
 
-const PORT = parseInt(process.env.PLC_PORT || process.env.FLASK_PORT || "5000", 10);
+const PORT = 5049;
 const WAIT_HOST = "127.0.0.1";
+
+let mainWin: BrowserWindow | null = null;
 
 function waitForPort(host: string, port: number, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -37,10 +39,6 @@ function waitForPort(host: string, port: number, timeoutMs: number): Promise<voi
 
 function plcAppRoot(): string {
   if (app.isPackaged) {
-    const portableDir = process.env.PORTABLE_EXECUTABLE_DIR;
-    if (portableDir) {
-      return portableDir;
-    }
     return path.dirname(process.execPath);
   }
   return path.resolve(__dirname, "..", "..", "..");
@@ -48,9 +46,6 @@ function plcAppRoot(): string {
 
 async function startBackendInProcess(): Promise<void> {
   process.env.PLC_APP_ROOT = plcAppRoot();
-  if (!process.env.FLASK_HOST) {
-    process.env.FLASK_HOST = "127.0.0.1";
-  }
 
   if (process.env.PLC_ELECTRON_EXTERNAL_SERVER === "1") {
     await waitForPort(WAIT_HOST, PORT, 60_000);
@@ -63,22 +58,35 @@ async function startBackendInProcess(): Promise<void> {
   await waitForPort(WAIT_HOST, PORT, 60_000);
 }
 
-function createWindow(): void {
-  const win = new BrowserWindow({
+function appUrl(pathWithQuery: string): string {
+  return `http://${WAIT_HOST}:${PORT}${pathWithQuery}`;
+}
+
+function createMainWindow(): void {
+  if (mainWin && !mainWin.isDestroyed()) {
+    mainWin.focus();
+    return;
+  }
+  mainWin = new BrowserWindow({
     width: 1400,
-    height: 900,
+    height: 1000,
     show: false,
+    icon: path.join(__dirname, "icon.png"),
     autoHideMenuBar: process.platform !== "darwin",
     webPreferences: {
-      nodeIntegration: false,
       contextIsolation: true,
+      nodeIntegration: false,
     },
   });
   if (process.platform !== "darwin") {
-    win.setMenuBarVisibility(false);
+    mainWin.setMenuBarVisibility(false);
   }
-  win.once("ready-to-show", () => win.show());
-  void win.loadURL(`http://${WAIT_HOST}:${PORT}`);
+  mainWin.once("ready-to-show", () => mainWin?.show());
+  void mainWin.loadURL(appUrl("/"));
+  mainWin.on("closed", () => {
+    mainWin = null;
+    app.quit();
+  });
 }
 
 app.whenReady().then(() => {
@@ -88,15 +96,11 @@ app.whenReady().then(() => {
 
   void startBackendInProcess()
     .then(() => {
-      createWindow();
+      createMainWindow();
     })
     .catch((err) => {
       const msg = err instanceof Error ? err.message : String(err);
       void dialog.showErrorBox("PLC Conveyor", `Could not start the app server:\n\n${msg}`);
       app.quit();
     });
-});
-
-app.on("window-all-closed", () => {
-  app.quit();
 });
