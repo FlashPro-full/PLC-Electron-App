@@ -6,7 +6,7 @@ import { configureRuntime } from "./runtime";
 import { startIntervalTimer } from "./timer";
 import { getBeltSpeed } from "../persistence/beltSettings";
 import { connectKeyboard } from "../input/keyboard";
-import { connectTcpScanner } from "../input/tcpScanner";
+import { connectTcp } from "../input/tcp";
 import { getScannerSettings } from "../persistence/deviceSettings";
 import { setBeltSpeed } from "./timer";
 
@@ -25,9 +25,9 @@ export async function bootstrapBackend(io: Server): Promise<void> {
   const onScanned = (barcode: string) => enqueueEvent("barcode", barcode, nowSec());
   
   if (isTcpScannerMode()) {
-    connectTcpScanner(onScanned);
+    connectTcp(onScanned);
   } else {
-    connectKeyboard(onScanned);
+    await connectKeyboard(onScanned);
   }
 
   connectPhotoEyeSignal((positionId: number | null) => enqueueEvent("photo_eye", positionId, nowSec()));

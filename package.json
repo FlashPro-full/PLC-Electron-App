@@ -16,24 +16,23 @@
     "dev:client": "vite --config src/client/vite.config.ts",
     "electron:dev": "npm run build:client && npm run build:server && npm run build:electron && concurrently -k \"cross-env PLC_APP_ROOT=.. tsx src/server/main.ts\" \"wait-on tcp:127.0.0.1:5049 && cross-env PLC_ELECTRON_EXTERNAL_SERVER=1 NODE_ENV=development electron .\"",
     "rebuild:electron": "electron-rebuild -f -t prod",
-    "postinstall": "node scripts/patch-node-gyp-vs18.mjs",
+    "postinstall": "node scripts/patch-node-gyp-vs18.mjs && node scripts/ensure-win-keyserver.mjs",
     "pack:win": "npm run build && electron-builder --win --x64"
   },
   "dependencies": {
     "@serialport/bindings-cpp": "^13.0.1",
+    "axios": "^1.7.9",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
     "lucide-react": "^1.6.0",
     "modbus-serial": "^8.0.17",
+    "node-global-key-listener": "^0.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.0.2",
     "socket.io": "^4.7.5",
     "socket.io-client": "^4.8.1",
     "three": "^0.172.0"
-  },
-  "optionalDependencies": {
-    "node-global-key-listener": "^0.3.0"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.7.1",
@@ -66,23 +65,17 @@
     "files": [
       "dist/**/*",
       "package.json",
-      "node_modules/**/*"
+      "scripts/ngkl-extract-win.cjs",
+      "node_modules/**/*",
+      "!node_modules/node-global-key-listener/bin/MacKeyServer",
+      "!node_modules/node-global-key-listener/bin/XServer"
     ],
     "asar": true,
     "asarUnpack": [
-      "**/node_modules/@serialport/bindings-cpp/**/*"
+      "**/node_modules/@serialport/bindings-cpp/**/*",
+      "**/node_modules/node-global-key-listener/**/*"
     ],
-    "npmRebuild": true,
-    "extraFiles": [
-      {
-        "from": "device.json",
-        "to": "device.json"
-      },
-      {
-        "from": "purescan.json",
-        "to": "purescan.json"
-      }
-    ],
+    "npmRebuild": false,
     "win": {
       "signAndEditExecutable": false,
       "target": [

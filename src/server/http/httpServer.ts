@@ -9,7 +9,7 @@ import { getBeltSettings, updateBeltSpeed, updatePushers } from "../persistence/
 import { setBeltSpeed } from "../core/timer";
 import { isPlcConnected, setPushersPlc } from "../hardware/plc";
 import { getScannerSettings } from "../persistence/deviceSettings";
-import { isTcpScannerActive } from "../input/tcpScanner";
+import { isTcpScannerActive } from "../input/tcp";
 import { isKeyboardListenerActive } from "../input/keyboard";
 import { writeBucket } from "../hardware/plc";
 
