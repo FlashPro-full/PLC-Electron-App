@@ -1,6 +1,7 @@
 import axios from "axios";
 import { getPurescanUrls } from "../persistence/purescanSettings";
 import { getPushers } from "../persistence/beltSettings";
+import { getProductCondition } from "../persistence/purescanSettings";
 
 const LOGIN_TIMEOUT_MS = 90_000;
 const LOGIN_RETRIES = 3;
@@ -10,6 +11,11 @@ let pushers: Record<string, { label?: string; distance?: number }> = {};
 let token: string | null = null;
 let refreshPromise: Promise<boolean> | null = null;
 let credential: { email: string; password: string } | null = null;
+let condition: boolean = false;
+
+export function setCondition(): void {
+  condition = getProductCondition();
+}
 
 export async function setCredential(email: string, password: string): Promise<boolean> {
   credential = { email, password };
@@ -136,16 +142,16 @@ async function refreshTokenOnce(): Promise<boolean> {
   }
 }
 
-export async function requestPurescan(barcode: string): Promise<{ pusher: number; label?: string; distance?: number } | null> {
+export async function requestPurescan(barcode: string): Promise<{ pusher: number; label?: string; distance?: number } | { status: string }> {
   const { dataUrl } = resolvedPurescan();
   if (!dataUrl) {
-    return null;
+    return { status: "Url not set" };
   }
 
   let auth = token;
   if (!auth) {
     console.warn(`No token available for barcode ${barcode}`);
-    return null;
+    return { status: "No token" };
   }
 
   const postOnce = async (bearer: string) => {
@@ -154,7 +160,7 @@ export async function requestPurescan(barcode: string): Promise<{ pusher: number
     try {
       return await axios.post(
         dataUrl,
-        { barcode },
+        { barcode, condition },
         { 
           headers: { 
             Authorization: `Bearer ${bearer}` 
@@ -170,7 +176,7 @@ export async function requestPurescan(barcode: string): Promise<{ pusher: number
     let res = await postOnce(auth);
     if (res.status === 200 && res.data.result && res.data.productData) {
       const label = labelFromPurescanResponse(res.data.productData);
-      return getPusherNumber(label);
+      return getPusherNumber(label) ?? { status: "No Label" };
     }
     if (res.status === 401) {
       console.warn(`Token expired (401), refreshing for barcode ${barcode}`);
@@ -180,9 +186,9 @@ export async function requestPurescan(barcode: string): Promise<{ pusher: number
         res = await postOnce(token);
         if (res.status === 200 && res.data.result && res.data.productData) {
           const label = labelFromPurescanResponse(res.data.productData);
-          return getPusherNumber(label);
+          return getPusherNumber(label) ?? { status: "No Label"};
         }
-      }
+      } else return { status: "No token" };
     }
     if (res.status === 404) {
       console.warn(`Purescan 404 for ${barcode}: ${res.data.error}`);
@@ -194,16 +200,15 @@ export async function requestPurescan(barcode: string): Promise<{ pusher: number
         }
       }
       if (flag) {
-        return getPusherNumber("Extra");
+        return getPusherNumber("Extra") ?? { status: "Not Found" };
       }
-      return null;
     }
     if (res.status === 500) {
       console.warn(`Purescan 500 for ${barcode}: ${res.data.error}`);
     }
-    return null;
+    return { status: "No response" };
   } catch (e) {
     console.error(`Purescan request error for ${barcode}:`, e);
-    return null;
+    return { status: "No response" };
   }
 }

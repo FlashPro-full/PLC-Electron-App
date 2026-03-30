@@ -3,7 +3,7 @@ import http from "http";
 import { Server as IOServer } from "socket.io";
 import { bootstrapBackend } from "../core/bootstrap";
 import { setCredential, setPushersPurescan } from "../integrations/purescan";
-import { getPurescanCredential, updatePurescanCredentials } from "../persistence/purescanSettings";
+import { getPurescanCredential, updateProductCondition, updatePurescanCredentials } from "../persistence/purescanSettings";
 import { getDeviceSettings, updateDeviceSettings } from "../persistence/deviceSettings";
 import { getBeltSettings, updateBeltSpeed, updatePushers } from "../persistence/beltSettings";
 import { setBeltSpeed } from "../core/timer";
@@ -115,6 +115,16 @@ export function createHttpServer(clientDir: string): {
       });
     } catch (err) {
       console.error("Notification error:", err);
+      return res.status(500).json({ result: false });
+    }
+  });
+
+  app.get("/api/toggle-new-used", async (req, res) => {
+    try {
+      const condition = req.body;
+      updateProductCondition(condition);
+    } catch (err) {
+      console.error("toggle error: ", err);
       return res.status(500).json({ result: false });
     }
   });

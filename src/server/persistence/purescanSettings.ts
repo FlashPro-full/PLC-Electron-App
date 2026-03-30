@@ -11,6 +11,7 @@ type purescanSettingsType = {
   password_b64: string | null;
   login_url: string;
   data_url: string;
+  condition: boolean;
 };
 
 function encodeCredentialField(plain: string): string | null {
@@ -44,6 +45,7 @@ export function ensurePurescanSettingsFile(): void {
         password_b64: null,
         login_url: PURESCAN_DEFAULT_LOGIN_URL,
         data_url: PURESCAN_DEFAULT_DATA_URL,
+        condition: false
       }, null, 2), "utf8");
     }
   } catch (err) {
@@ -91,3 +93,27 @@ export function updatePurescanCredentials(email: string, password: string): void
     console.error(`Error updating purescan credentials: ${err}`);
   }
 }
+
+export function getProductCondition(): boolean {
+  try {
+    const p = path.join(process.cwd(), PURESCAN_FILE);
+    const raw = fs.readFileSync(p, "utf8");
+    const purescan = JSON.parse(raw) as purescanSettingsType;
+    return purescan?.condition ?? false;
+  } catch (err) {
+    console.error(`Error getting purescan condition: ${err}`);
+    return false;
+  }
+}
+
+export function updateProductCondition(condition: boolean): void {
+  try {
+    const p = path.join(process.cwd(), PURESCAN_FILE);
+    const raw = fs.readFileSync(p, "utf-8");
+    const purescan = JSON.parse(raw) as purescanSettingsType;
+    purescan.condition = condition;
+    fs.writeFileSync(p, JSON.stringify(purescan, null, 2), "utf-8");
+  } catch (err) {
+    console.error(`Error updating purescan condition: ${err}`);
+  }
+} 

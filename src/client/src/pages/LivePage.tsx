@@ -11,9 +11,12 @@ import {
 } from "../hooks/useLiveConveyor";
 
 export function LivePage() {
+  
   const [beltSettings, setBeltSettings] = useState<BeltSettingsType | null>(null);
-  const { items } = useLiveConveyor(beltSettings);
   const [systemStatus, setSystemStatus] = useState<SystemStatusType | null>(null);
+  const [newMode, setNewMode] = useState<boolean>(false);
+  
+  const { items } = useLiveConveyor(beltSettings);
   const conveyorRef = useRef<ConveyorSystem3D | null>(null);
 
   useEffect(() => {
@@ -48,6 +51,13 @@ export function LivePage() {
     };
   }, []);
 
+  const handleNewToggle = async () => {
+    const res = await axios.post("/api/toggle-new-used", !newMode);
+    if (res.data.result) {
+      setNewMode((prev) => !prev);
+    }
+  }
+
   return (
     <main className="w-full h-screen max-w-full p-4 max-md:w-[95%] max-md:p-6 bg-white/90 shadow-[0_25px_60px_rgba(58,122,254,0.18)] border border-[rgba(26,29,35,0.08)] grid grid-rows-[auto_1fr_auto] gap-3 overflow-hidden max-md:[&_button]:w-full">
       <header className="flex justify-between items-center max-md:flex-col max-md:items-start max-md:gap-3">
@@ -63,6 +73,25 @@ export function LivePage() {
             </span>
             <span>Settings</span>
           </Link>
+          <button
+            type="button"
+            onClick={handleNewToggle}
+            className="flex items-center gap-2 focus:outline-none rounded"
+            aria-pressed={newMode}
+          >
+            <span
+              className={`relative inline-flex h-6 w-12 shrink-0 rounded-full transition-colors ${
+                newMode ? 'bg-[#3a7afe]' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-5 w-5 mt-0.5 rounded-full bg-white shadow-sm transition-transform ${
+                  newMode ? 'translate-x-6 ml-0.5' : 'translate-x-0.5'
+                }`}
+              />
+            </span>
+            <span className="text-lg font-medium text-black">New</span>
+          </button>
           <StatusBar status={systemStatus} />
         </div>
       </header>

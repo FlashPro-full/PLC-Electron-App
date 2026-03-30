@@ -12,6 +12,9 @@ function rowStyles(status: string) {
   } else if (status === "No response") {
     statusColor = "#e74c3c";
     statusBg = "rgba(231, 76, 60, 0.1)";
+  } else {
+    statusColor = "#f39c12";
+    statusBg = "rgba(243, 156, 18, 0.1)";
   }
   return { statusColor, statusBg };
 }

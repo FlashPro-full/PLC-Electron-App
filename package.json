@@ -16,7 +16,7 @@
     "dev:client": "vite --config src/client/vite.config.ts",
     "electron:dev": "npm run build:client && npm run build:server && npm run build:electron && concurrently -k \"cross-env PLC_APP_ROOT=.. tsx src/server/main.ts\" \"wait-on tcp:127.0.0.1:5049 && cross-env PLC_ELECTRON_EXTERNAL_SERVER=1 NODE_ENV=development electron .\"",
     "rebuild:electron": "electron-rebuild -f -t prod",
-    "postinstall": "node scripts/patch-node-gyp-vs18.mjs && node scripts/ensure-win-keyserver.mjs",
+    "postinstall": "node scripts/patch-node-gyp-vs18.mjs",
     "pack:win": "npm run build && electron-builder --win --x64"
   },
   "dependencies": {
@@ -27,6 +27,7 @@
     "lucide-react": "^1.6.0",
     "modbus-serial": "^8.0.17",
     "node-global-key-listener": "^0.3.0",
+    "node-hid": "^3.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.0.2",
@@ -38,7 +39,7 @@
     "@electron/rebuild": "^3.7.1",
     "@tailwindcss/postcss": "^4.2.2",
     "@types/express": "^4.17.21",
-    "@types/node": "^20.14.0",
+    "@types/node": "^20.19.37",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
@@ -65,15 +66,12 @@
     "files": [
       "dist/**/*",
       "package.json",
-      "scripts/ngkl-extract-win.cjs",
-      "node_modules/**/*",
-      "!node_modules/node-global-key-listener/bin/MacKeyServer",
-      "!node_modules/node-global-key-listener/bin/XServer"
+      "node_modules/**/*"
     ],
     "asar": true,
     "asarUnpack": [
       "**/node_modules/@serialport/bindings-cpp/**/*",
-      "**/node_modules/node-global-key-listener/**/*"
+      "**/node_modules/node-hid/**/*"
     ],
     "npmRebuild": false,
     "win": {

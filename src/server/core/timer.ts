@@ -83,13 +83,18 @@ async function handleEvent(event: { type: string; payload: unknown; ts?: number 
   if (eventType === "purescan_ok") {
     const pl = payload as { barcode: string; response: unknown };
     const barcode = pl.barcode;
-    const response = pl.response as { pusher?: number; label?: string; distance?: number } | null | undefined;
+    const response = pl.response as { pusher?: number; label?: string; distance?: number } | { status: string };
 
-    if (response == null || typeof response !== "object") {
+    const isStatusOnly =
+      "status" in response &&
+      response.status !== undefined &&
+      (!("pusher" in response) || response.pusher === undefined);
+
+    if (isStatusOnly) {
       let emitData: productItem | null = null;
       if (productBuffer.has(barcode)) {
         const b = productBuffer.get(barcode)!;
-        b.status = "No response";
+        b.status = response.status;
         b.label = "Fall Down";
         emitData = { ...b };
       }
@@ -100,9 +105,10 @@ async function handleEvent(event: { type: string; payload: unknown; ts?: number 
       return;
     }
 
-    const label = response.label;
-    const distance = response.distance;
-    const pusher = response.pusher;
+    const details = response as { pusher?: number; label?: string; distance?: number };
+    const label = details.label;
+    const distance = details.distance;
+    const pusher = details.pusher;
     let emitData: productItem | null = null;
     if (productBuffer.has(barcode)) {
       const b = productBuffer.get(barcode)!;

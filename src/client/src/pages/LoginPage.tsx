@@ -4,10 +4,6 @@ import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import PureScanLogo from "../assets/PureScanLogo.png";
 
-type LoginPageProps = {
-  onSignedIn?: () => void;
-};
-
 export function LoginPage() {
   const navigate = useNavigate();
 
