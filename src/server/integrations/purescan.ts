@@ -57,13 +57,16 @@ export async function initToken(): Promise<boolean> {
     try {
       const controller = new AbortController();
       const t = setTimeout(() => controller.abort(), LOGIN_TIMEOUT_MS);
-      const res = await axios.post(loginUrl, credential);
-      clearTimeout(t);
-      if (res.data.result && res.data.token) {
-        token = res.data.token;
-        return true;
+      try {
+        const res = await axios.post(loginUrl, credential);
+        if (res.data.result && res.data.token) {
+          token = res.data.token;
+          return true;
+        }
+        return false;
+      } finally {
+        clearTimeout(t);
       }
-      return false;
     } catch (e) {
       lastErr = e;
       if (attempt < LOGIN_RETRIES - 1) {
@@ -142,16 +145,16 @@ async function refreshTokenOnce(): Promise<boolean> {
   }
 }
 
-export async function requestPurescan(barcode: string): Promise<{ pusher: number; label?: string; distance?: number } | { status: string }> {
+export async function requestPurescan(barcode: string): Promise<{ pusher: number; label?: string; distance?: number } | { reason: string }> {
   const { dataUrl } = resolvedPurescan();
   if (!dataUrl) {
-    return { status: "Url not set" };
+    return { reason: "Url not set" };
   }
 
   let auth = token;
   if (!auth) {
     console.warn(`No token available for barcode ${barcode}`);
-    return { status: "No token" };
+    return { reason: "No Token" };
   }
 
   const postOnce = async (bearer: string) => {
@@ -160,7 +163,7 @@ export async function requestPurescan(barcode: string): Promise<{ pusher: number
     try {
       return await axios.post(
         dataUrl,
-        { barcode, condition },
+        { barcode: barcode, condition: condition },
         { 
           headers: { 
             Authorization: `Bearer ${bearer}` 
@@ -174,41 +177,33 @@ export async function requestPurescan(barcode: string): Promise<{ pusher: number
 
   try {
     let res = await postOnce(auth);
-    if (res.status === 200 && res.data.result && res.data.productData) {
-      const label = labelFromPurescanResponse(res.data.productData);
-      return getPusherNumber(label) ?? { status: "No Label" };
+    if (res.status === 200) {
+      const label = labelFromPurescanResponse(res.data);
+      return getPusherNumber(label) ?? { reason: "No Label" };
     }
-    if (res.status === 401) {
-      console.warn(`Token expired (401), refreshing for barcode ${barcode}`);
-      token = null;
-      const ok = await refreshTokenOnce();
-      if (ok && token) {
-        res = await postOnce(token);
-        if (res.status === 200 && res.data.result && res.data.productData) {
-          const label = labelFromPurescanResponse(res.data.productData);
-          return getPusherNumber(label) ?? { status: "No Label"};
-        }
-      } else return { status: "No token" };
-    }
-    if (res.status === 404) {
-      console.warn(`Purescan 404 for ${barcode}: ${res.data.error}`);
-      let flag = false;
-      for (const [__pusherName, config] of Object.entries(pushers)) {
-        if (config.label === "Extra") {
-          flag = true;
-          break;
-        }
+    return { reason: "No response" };
+  } catch (e: any) {
+    if (e.response) {
+      if (e.response.status === 401) {
+        console.warn(`Token expired (401), refreshing for barcode ${barcode}`);
+        token = null;
+        const ok = await refreshTokenOnce();
+        if (ok && token) {
+          const res = await postOnce(token);
+          if (res.status === 200) {
+            const label = labelFromPurescanResponse(res.data);
+            return getPusherNumber(label) ?? { reason: "No Label"};
+          }
+        } else return { reason: "No Token" };
       }
-      if (flag) {
-        return getPusherNumber("Extra") ?? { status: "Not Found" };
+      if (e.response.status === 404) {
+        console.warn(`Purescan 404 for ${barcode}: ${e.response.data.error}`);
+        return getPusherNumber("Extra") ?? { reason: "Not Found" };
+      }
+      if (e.response.status === 500) {
+        console.warn(`Purescan 500 for ${barcode}: ${e.response.data.error}`);
       }
     }
-    if (res.status === 500) {
-      console.warn(`Purescan 500 for ${barcode}: ${res.data.error}`);
-    }
-    return { status: "No response" };
-  } catch (e) {
-    console.error(`Purescan request error for ${barcode}:`, e);
-    return { status: "No response" };
+    return { reason: "No response" };
   }
 }

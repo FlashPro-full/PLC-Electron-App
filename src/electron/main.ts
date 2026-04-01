@@ -22,6 +22,7 @@ function waitForPort(host: string, port: number, timeoutMs: number): Promise<voi
         scheduleRetry();
       });
       socket.once("error", () => {
+        socket.destroy();
         scheduleRetry();
       });
       socket.connect(port, host);

@@ -83,19 +83,16 @@ async function handleEvent(event: { type: string; payload: unknown; ts?: number 
   if (eventType === "purescan_ok") {
     const pl = payload as { barcode: string; response: unknown };
     const barcode = pl.barcode;
-    const response = pl.response as { pusher?: number; label?: string; distance?: number } | { status: string };
+    const response = pl.response as { pusher?: number; label?: string; distance?: number } | { reason: string };
 
-    const isStatusOnly =
-      "status" in response &&
-      response.status !== undefined &&
-      (!("pusher" in response) || response.pusher === undefined);
+    const isStatusOnly = "reason" in response && response.reason !== undefined;
 
     if (isStatusOnly) {
       let emitData: productItem | null = null;
       if (productBuffer.has(barcode)) {
         const b = productBuffer.get(barcode)!;
-        b.status = response.status;
-        b.label = "Fall Down";
+        b.status = "forward";
+        b.label = response.reason;
         emitData = { ...b };
       }
       if (emitData) {
@@ -161,15 +158,15 @@ async function onInterval100ms(): Promise<void> {
   const now = nowSec();
   await drainEvents(now);
 
-  if (barcodeQueue.length > 0 && barcodeQueue[0] && now - barcodeQueue[0].start_time >= 1) {
+  while (barcodeQueue.length > 0 && barcodeQueue[0] && now - barcodeQueue[0].start_time >= 1.5) {
     const first = barcodeQueue.shift()!;
     const barcode = first.barcode;
     productBuffer.delete(barcode);
   }
 
-  for (const barcode of [...productBuffer.keys()]) {
-    const item = productBuffer.get(barcode);
-    if (!item) {
+  for (const [barcode, item] of productBuffer.entries()) {
+    if (now - item.start_time > 60) {
+      productBuffer.delete(barcode);
       continue;
     }
     const label = item.label;

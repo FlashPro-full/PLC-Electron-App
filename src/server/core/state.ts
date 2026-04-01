@@ -1,4 +1,4 @@
-export const MAX_EVENT_QUEUE = 5000;
+export const MAX_EVENT_QUEUE = 100;
 
 export interface productItem {
   barcode: string;

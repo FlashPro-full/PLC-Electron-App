@@ -1310,8 +1310,37 @@ export class ConveyorSystem3D {
         if (this._onResize) {
             window.removeEventListener("resize", this._onResize);
         }
+
+        if (this.scene) {
+            this.scene.traverse((object) => {
+                if (object.geometry) {
+                    object.geometry.dispose();
+                }
+                if (object.material) {
+                    if (Array.isArray(object.material)) {
+                        object.material.forEach(material => this.disposeMaterial(material));
+                    } else {
+                        this.disposeMaterial(object.material);
+                    }
+                }
+            });
+        }
+
         if (this.renderer) {
             this.renderer.dispose();
+            if (this.renderer.domElement && this.renderer.domElement.parentNode) {
+                this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);
+            }
+        }
+    }
+
+    disposeMaterial(material) {
+        material.dispose();
+        for (const key of Object.keys(material)) {
+            const value = material[key];
+            if (value && typeof value === 'object' && 'minFilter' in value) {
+                value.dispose();
+            }
         }
     }
 }

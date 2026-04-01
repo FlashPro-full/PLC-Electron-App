@@ -68,7 +68,7 @@ function runPositionUpdate() {
       return;
     }
 
-    if (item.status === "pending" || item.status === "No response") {
+    if (item.status === "pending" || item.status === "forward") {
       if (item.start_time != null) {
         const startTime =
           typeof item.start_time === "string" ? parseFloat(item.start_time) : (item.start_time as number);
@@ -89,7 +89,7 @@ function runPositionUpdate() {
         typeof item.start_time === "string" ? parseFloat(item.start_time) : (item.start_time as number);
       const elapsed = currentTime - startTime;
       if (elapsed >= FETCH_TIMEOUT_SEC) {
-        item.status = "No response";
+        item.status = "forward";
         item.start_time = currentTime;
       }
       return;

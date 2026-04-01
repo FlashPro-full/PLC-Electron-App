@@ -9,7 +9,7 @@ function rowStyles(status: string) {
   } else if (status === "routing" || status === "completed") {
     statusColor = "#3498db";
     statusBg = "rgba(52, 152, 219, 0.1)";
-  } else if (status === "No response") {
+  } else if (status === "forward") {
     statusColor = "#e74c3c";
     statusBg = "rgba(231, 76, 60, 0.1)";
   } else {

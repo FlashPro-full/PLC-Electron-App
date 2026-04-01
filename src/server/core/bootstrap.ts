@@ -19,7 +19,12 @@ function isTcpScannerMode(): boolean {
   return s === "tcp/telnet" || s === "tcptelnet" || s === "optimal";
 }
 
+let bootstrapped = false;
+
 export async function bootstrapBackend(io: Server): Promise<void> {
+  if (bootstrapped) return;
+  bootstrapped = true;
+
   await connectPlc();
 
   const onScanned = (barcode: string) => enqueueEvent("barcode", barcode, nowSec());
