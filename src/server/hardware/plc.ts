@@ -38,6 +38,7 @@ export async function connectPlc(): Promise<ModbusRTU | null> {
     });
     client.setID(1);
     plc = client;
+    console.log("Connected to PLC");
     return client;
   } catch(err) {
     console.error("Modbus connect error:", err);

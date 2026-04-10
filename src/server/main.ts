@@ -1,6 +1,8 @@
 import dotenv from "dotenv";
 import path from "path";
 import { createHttpServer } from "./http/httpServer";
+import { resetPlcConnection } from "./hardware/plc";
+import { disconnectTcp } from "./input/tcp";
 import { ensureBeltSettingsFile } from "./persistence/beltSettings";
 import { ensureDeviceSettingsFile } from "./persistence/deviceSettings";
 import { ensurePurescanSettingsFile } from "./persistence/purescanSettings";
@@ -28,6 +30,14 @@ export async function runServer(): Promise<void> {
     server.once("error", reject);
     server.listen(port, host, () => resolve());
   });
+
+  const shutdown = (): void => {
+    resetPlcConnection();
+    disconnectTcp();
+    server.close(() => process.exit(0));
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
 
   console.log(`Belt-System listening on http://${host}:${port}`);
 }

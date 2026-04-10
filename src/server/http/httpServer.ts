@@ -29,8 +29,10 @@ function buildSystemStatus(): SystemStatusType {
   const mode = (scan.mode ?? "").trim().toLowerCase().replace(/\s+/g, "");
   const tcpMode = mode === "tcp/telnet" || mode === "tcptelnet" || mode === "optimal";
   let scanner: SystemStatusType["scanner"];
+  console.log(`Scanner mode: ${mode}, TCP mode: ${tcpMode}`);
   if (tcpMode) {
     const ok = isTcpScannerActive();
+    console.log(`TCP scanner active: ${ok}`);
     scanner = { connected: ok, message: ok ? "Active" : "Inactive" };
   } else {
     const ok = isKeyboardListenerActive();

@@ -30,7 +30,7 @@ export async function bootstrapBackend(io: Server): Promise<void> {
   const onScanned = (barcode: string) => enqueueEvent("barcode", barcode, nowSec());
   
   if (isTcpScannerMode()) {
-    connectTcp(onScanned);
+    await connectTcp(onScanned);
   } else {
     await connectKeyboard(onScanned);
   }
