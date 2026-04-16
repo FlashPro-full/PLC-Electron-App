@@ -39,6 +39,7 @@ const DEFAULT_SETTINGS = {
     },
   },
   belt_speed: 32.0,
+  distance: 50
 };
 
 type beltSettingsType = typeof DEFAULT_SETTINGS;
@@ -87,6 +88,27 @@ export function updateBeltSpeed(speed: number): void {
     fs.writeFileSync(p, JSON.stringify(settings, null, 2), "utf8");
   } catch (err) {
     console.log(`Error updating belt speed: ${err}`);
+  }
+}
+
+export function getDistance(): number {
+  try {
+    return getBeltSettings().distance;
+  } catch (err) {
+    console.log(`Error getting distance: ${err}`);
+    return DEFAULT_SETTINGS.distance;
+  }
+}
+
+export function updateDistance(distance: number): void {
+  try {
+    const p = path.join(process.cwd(), BELT_SETTINGS_FILE);
+    const raw = fs.readFileSync(p, "utf8");
+    const settings = JSON.parse(raw) as beltSettingsType;
+    settings.distance = distance;
+    fs.writeFileSync(p, JSON.stringify(settings, null, 2), "utf8");
+  } catch (err) {
+    console.log(`Error updating distance: ${err}`);
   }
 }
 

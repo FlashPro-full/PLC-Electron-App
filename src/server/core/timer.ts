@@ -1,4 +1,11 @@
-import { productBuffer, barcodeQueue, eventQueue, enqueueEvent, type productItem } from "./state";
+import {
+  productBuffer,
+  pendingScanQueue,
+  MAX_PENDING_SCAN,
+  eventQueue,
+  enqueueEvent,
+  type productItem,
+} from "./state";
 import { emitSocket } from "./runtime";
 import { writeBucket } from "../hardware/plc";
 import { requestPurescan } from "../integrations/purescan";
@@ -24,6 +31,10 @@ function createdAtStr(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+function effectiveBeltSpeed(): number {
+  return beltSpeed > 0 ? beltSpeed : 1e-6;
+}
+
 async function handleEvent(event: { type: string; payload: unknown; ts?: number }, now: number): Promise<void> {
   const eventType = event.type;
   const payload = event.payload;
@@ -31,52 +42,44 @@ async function handleEvent(event: { type: string; payload: unknown; ts?: number 
 
   if (eventType === "barcode") {
     const barcode = payload as string;
-    const item: productItem = {
-      barcode,
+
+    if (pendingScanQueue.length > 0) {
+      const item = pendingScanQueue.shift()!;
+      item.barcode = barcode;
+      item.status = "fetching";
+      item.start_time = ts;
+      productBuffer.set(barcode, item);
+      emitSocket("add_book", item);
+      void requestPurescan(barcode).then(
+        (response) => enqueueEvent("purescan_ok", { barcode, response }, nowSec()),
+        (error: unknown) =>
+          enqueueEvent("purescan_err", { barcode, error: String(error) }, nowSec())
+      );
+      return;
+    }
+
+    return;
+  }
+
+  if (eventType === "photo_eye") {
+    const positionId = payload as number | null;
+    if (positionId == null) {
+      return;
+    }
+    if (pendingScanQueue.length >= MAX_PENDING_SCAN) {
+      pendingScanQueue.shift();
+    }
+    pendingScanQueue.push({
+      barcode: "",
       start_time: ts,
-      positionId: null,
+      positionId,
       positionCm: null,
       pusher: null,
       label: null,
       distance: null,
       status: "pending",
       created_at: createdAtStr(),
-    };
-    barcodeQueue.push(item);
-    productBuffer.set(barcode, item);
-    emitSocket("add_book", item);
-    void requestPurescan(barcode).then(
-      (response) => enqueueEvent("purescan_ok", { barcode, response }, nowSec()),
-      (error: unknown) =>
-        enqueueEvent("purescan_err", { barcode, error: String(error) }, nowSec())
-    );
-    return;
-  }
-
-  if (eventType === "photo_eye") {
-    const positionId = payload as number | null;
-    let barcode: string | null = null;
-    let emitData: productItem | null = null;
-    if (barcodeQueue.length > 0) {
-      const item = barcodeQueue.shift();
-      barcode = item?.barcode ?? null;
-    }
-    if (barcode && productBuffer.has(barcode)) {
-      const entry = productBuffer.get(barcode)!;
-      const distance = entry.distance;
-      entry.positionId = positionId;
-      entry.start_time = ts;
-      if (distance == null) {
-        entry.status = "fetching";
-      } else {
-        entry.status = "progress";
-        entry.push_time = ts + distance / beltSpeed;
-      }
-      emitData = { ...entry };
-    }
-    if (emitData) {
-      emitSocket("update_book", emitData);
-    }
+    });
     return;
   }
 
@@ -91,7 +94,7 @@ async function handleEvent(event: { type: string; payload: unknown; ts?: number 
       let emitData: productItem | null = null;
       if (productBuffer.has(barcode)) {
         const b = productBuffer.get(barcode)!;
-        b.status = "forward";
+        b.status = "moving";
         b.label = response.reason;
         emitData = { ...b };
       }
@@ -112,9 +115,11 @@ async function handleEvent(event: { type: string; payload: unknown; ts?: number 
       b.pusher = pusher ?? null;
       b.label = label ?? null;
       b.distance = distance ?? null;
-      if (b.status === "fetching" && distance != null) {
+      if (distance != null && b.positionId != null) {
         b.status = "progress";
-        b.push_time = b.start_time + distance / beltSpeed;
+        b.push_time = b.start_time + distance / effectiveBeltSpeed();
+      } else if (distance != null) {
+        b.status = "fetching";
       }
       emitData = { ...b };
     }
@@ -130,7 +135,7 @@ async function handleEvent(event: { type: string; payload: unknown; ts?: number 
     let emitData: productItem | null = null;
     if (productBuffer.has(barcode)) {
       const b = productBuffer.get(barcode)!;
-      b.status = "No response";
+      b.status = "moving";
       b.label = "Fall Down";
       emitData = { ...b };
     }
@@ -158,10 +163,8 @@ async function onInterval100ms(): Promise<void> {
   const now = nowSec();
   await drainEvents(now);
 
-  while (barcodeQueue.length > 0 && barcodeQueue[0] && now - barcodeQueue[0].start_time >= 1.5) {
-    const first = barcodeQueue.shift()!;
-    const barcode = first.barcode;
-    productBuffer.delete(barcode);
+  while (pendingScanQueue.length > 0 && now - pendingScanQueue[0].start_time >= 1.5) {
+    pendingScanQueue.shift();
   }
 
   for (const [barcode, item] of productBuffer.entries()) {

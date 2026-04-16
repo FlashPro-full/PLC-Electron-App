@@ -5,7 +5,7 @@ import { bootstrapBackend } from "../core/bootstrap";
 import { setCredential, setPushersPurescan } from "../integrations/purescan";
 import { getPurescanCredential, updateProductCondition, updatePurescanCredentials } from "../persistence/purescanSettings";
 import { getDeviceSettings, updateDeviceSettings } from "../persistence/deviceSettings";
-import { getBeltSettings, updateBeltSpeed, updatePushers } from "../persistence/beltSettings";
+import { getBeltSettings, updateBeltSpeed, updateDistance, updatePushers } from "../persistence/beltSettings";
 import { setBeltSpeed } from "../core/timer";
 import { isPlcConnected, setPushersPlc } from "../hardware/plc";
 import { getScannerSettings } from "../persistence/deviceSettings";
@@ -163,6 +163,16 @@ export function createHttpServer(clientDir: string): {
       return res.status(200).json({ result: true });
     } catch (err) {
       console.error("Belt speed error:", err);
+      return res.status(500).json({ result: false });
+    }
+  });
+
+  app.put("/api/settings/distance", async (req, res) => {
+    try {
+      updateDistance(req.body.distance);
+      return res.status(200).json({ result: true });
+    } catch (err) {
+      console.error("Distance error:", err);
       return res.status(500).json({ result: false });
     }
   });

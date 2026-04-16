@@ -14,7 +14,8 @@ export interface productItem {
 }
 
 export const productBuffer = new Map<string, productItem>();
-export const barcodeQueue: productItem[] = [];
+export const pendingScanQueue: productItem[] = [];
+export const MAX_PENDING_SCAN = 16;
 export const eventQueue: Array<{ type: string; payload: unknown; ts?: number }> = [];
 
 export function enqueueEvent(type: string, payload: unknown, ts?: number): void {

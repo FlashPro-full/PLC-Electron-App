@@ -7,7 +7,7 @@ import { PUSHER_LABEL_OPTIONS, PUSHER_NAMES } from "../utils/constants";
 
 type PusherConfig = { label: string; distance: number };
 
-type TabId = "bucket-distance" | "belt-speed";
+type TabId = "bucket-distance" | "belt-speed" | "photo-scanner-distance";
 
 const tabInactive = "border-transparent bg-transparent text-[#6c7282] hover:bg-[rgba(58,122,254,0.08)] hover:text-[#1a1d23]";
 const tabActive = "border-b-[#3a7afe] bg-[rgba(58,122,254,0.06)] text-[#3a7afe]";
@@ -20,6 +20,7 @@ export function SettingsPage() {
     Object.fromEntries(PUSHER_NAMES.map((n) => [n, { label: "None", distance: 0 }]))
   );
   const [beltSpeed, setBeltSpeed] = useState("");
+  const [photoEyeScannerCm, setPhotoEyeScannerCm] = useState("");
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -27,7 +28,9 @@ export function SettingsPage() {
         const res = await axios.get("/api/settings");
         if (res.data.result) {
           setPushers(res.data.settings.pushers);
-          setBeltSpeed(res.data.settings.belt_speed);
+          setBeltSpeed(String(res.data.settings.belt_speed ?? ""));
+          const d = res.data.settings.distance;
+          setPhotoEyeScannerCm(d != null && d !== "" ? String(d) : "");
         }
       } catch (err) {
         console.error("Error fetching settings:", err);
@@ -68,7 +71,7 @@ export function SettingsPage() {
     }
     
     try {
-      const res = await axios.put("/api/settigns/belt-speed", { speed: beltSpeed });
+      const res = await axios.put("/api/settings/belt-speed", { speed: Number(beltSpeed) });
       if (res.data.result) {
         showToast("Updated Successfully", { type: "success"});
       }
@@ -76,6 +79,27 @@ export function SettingsPage() {
       showToast(err.response.data.error || "Failed to update", { type: "error" });
     }
     
+  };
+
+  const onSavePhotoScannerDistance = async (e: FormEvent) => {
+    e.preventDefault();
+    const cm = parseFloat(photoEyeScannerCm);
+    if (Number.isNaN(cm) || cm < 0) {
+      showToast("Distance must be a non-negative number (cm)", { type: "warning" });
+      return;
+    }
+    try {
+      const res = await axios.put("/api/settings/distance", { distance: cm });
+      if (res.data.result) {
+        showToast("Updated Successfully", { type: "success" });
+      }
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === "object" && "response" in err
+          ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+          : undefined;
+      showToast(msg || "Failed to update", { type: "error" });
+    }
   };
 
   const triggerPusher = useCallback(async (n: number) => {
@@ -131,6 +155,16 @@ export function SettingsPage() {
           >
             Belt speed
           </button>
+          <button
+            type="button"
+            className={`-mb-0.5 cursor-pointer rounded-t-[10px] border-0 border-b-[3px] px-5 py-3 text-base font-semibold transition-all
+                        ${tab === "photo-scanner-distance" ? tabActive : tabInactive}`}
+            role="tab"
+            aria-selected={tab === "photo-scanner-distance"}
+            onClick={() => setTab("photo-scanner-distance")}
+          >
+            Eye → scanner
+          </button>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -165,8 +199,7 @@ export function SettingsPage() {
               </div>
 
               <div id="pusherSettings" className="grid grid-cols-3 gap-[18px] max-md:grid-cols-1">
-                {PUSHER_NAMES.map((name) => {console.log(pushers[name].label); return (
-                  
+                {PUSHER_NAMES.map((name) => (
                   <fieldset key={name} className="grid gap-3 rounded-2xl border border-[rgba(26,29,35,0.06)] bg-white/90 px-5 py-[18px]">
                     <legend className="mb-1 px-1 text-base font-semibold text-[#1a1d23]">{name}</legend>
                     <div className="grid gap-1.5">
@@ -202,7 +235,7 @@ export function SettingsPage() {
                       />
                     </div>
                   </fieldset>
-                )})}
+                ))}
               </div>
 
               <div className="flex justify-end">
@@ -243,6 +276,48 @@ export function SettingsPage() {
                 <div className="flex justify-end mt-2">
                   <button type="submit" className="cursor-pointer rounded-[14px] border-0 bg-[#3a7afe] px-5 py-3.5 text-base font-semibold text-white shadow-[0_12px_20px_rgba(58,122,254,0.22)] transition-all hover:-translate-y-px hover:bg-[#2e63d4] active:translate-y-0 max-md:w-full">
                     <Save className="w-5 h-5 inline-block mr-1 -mt-0.75" />Save
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div
+            id="tab-photo-scanner-distance"
+            className={tab !== "photo-scanner-distance" ? "hidden" : "block pb-6"}
+            role="tabpanel"
+            aria-hidden={tab !== "photo-scanner-distance"}
+          >
+            <div className="flex w-full shrink-0 flex-col overflow-hidden rounded-xl border border-[rgba(26,29,35,0.08)] bg-white/[0.75] p-3 max-w-[480px]">
+              <p className="mb-4 mt-0 text-[0.95rem] text-[#6c7282]">
+                Distance along the belt from the <strong>photo eye</strong> to the <strong>scanner</strong> (cm). Used
+                with belt speed when scheduling the scanner trigger after a photo-eye edge.
+              </p>
+              <form className="grid gap-3" onSubmit={onSavePhotoScannerDistance}>
+                <label
+                  htmlFor="photoEyeScannerCm"
+                  className="text-[0.9rem] font-semibold uppercase tracking-wide text-[#6c7282]"
+                >
+                  Distance (cm)
+                </label>
+                <input
+                  type="number"
+                  step={0.001}
+                  min={0}
+                  id="photoEyeScannerCm"
+                  name="photoEyeScannerCm"
+                  className="box-border w-full rounded-xl border border-[rgba(26,29,35,0.08)] bg-white/60 px-4 py-3.5 text-base text-[#1a1d23] transition-all focus:border-[rgba(58,122,254,0.6)] focus:shadow-[0_0_0_4px_rgba(58,122,254,0.15)] focus:outline-none"
+                  value={photoEyeScannerCm}
+                  onChange={(e) => setPhotoEyeScannerCm(e.target.value)}
+                  required
+                />
+                <div className="flex justify-end mt-2">
+                  <button
+                    type="submit"
+                    className="cursor-pointer rounded-[14px] border-0 bg-[#3a7afe] px-5 py-3.5 text-base font-semibold text-white shadow-[0_12px_20px_rgba(58,122,254,0.22)] transition-all hover:-translate-y-px hover:bg-[#2e63d4] active:translate-y-0 max-md:w-full"
+                  >
+                    <Save className="w-5 h-5 inline-block mr-1 -mt-0.75" />
+                    Save
                   </button>
                 </div>
               </form>
