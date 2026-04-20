@@ -12,6 +12,8 @@ let token: string | null = null;
 let refreshPromise: Promise<boolean> | null = null;
 let credential: { email: string; password: string } | null = null;
 let condition: boolean = false;
+let dataUrl: string | null = null;
+let loginUrl: string | null = null;
 
 export function setCondition(): void {
   condition = getProductCondition();
@@ -22,16 +24,13 @@ export async function setCredential(email: string, password: string): Promise<bo
   return await initToken();
 }
 
-function resolvedPurescan(): {
-  loginUrl: string | null;
-  dataUrl: string | null;
-} {
+export function resolvedPurescan(): void {
   const urls = getPurescanUrls();
-  return {
-    loginUrl: urls.login_url,
-    dataUrl: urls.data_url
-  };
+  loginUrl = urls.login_url;
+  dataUrl = urls.data_url;
 }
+
+resolvedPurescan();
 
 export function resetPurescanSession(): void {
   token = null;
@@ -47,7 +46,6 @@ function sleep(ms: number): Promise<void> {
 }
 
 export async function initToken(): Promise<boolean> {
-  const { loginUrl } = resolvedPurescan();
   if (!loginUrl || !credential) {
     console.log("No login url or credential");
     return false;
@@ -146,10 +144,10 @@ async function refreshTokenOnce(): Promise<boolean> {
 }
 
 export async function requestPurescan(barcode: string): Promise<{ pusher: number; label?: string; distance?: number } | { reason: string }> {
-  const { dataUrl } = resolvedPurescan();
   if (!dataUrl) {
     return { reason: "Url not set" };
   }
+  const scanUrl = dataUrl;
 
   let auth = token;
   if (!auth) {
@@ -162,7 +160,7 @@ export async function requestPurescan(barcode: string): Promise<{ pusher: number
     const t = setTimeout(() => controller.abort(), 5000);
     try {
       return await axios.post(
-        dataUrl,
+        scanUrl,
         { barcode: barcode, condition: condition },
         { 
           headers: { 

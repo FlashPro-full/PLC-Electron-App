@@ -6,12 +6,12 @@ import { setCredential, setPushersPurescan } from "../integrations/purescan";
 import { getPurescanCredential, updateProductCondition, updatePurescanCredentials } from "../persistence/purescanSettings";
 import { getDeviceSettings, updateDeviceSettings } from "../persistence/deviceSettings";
 import { getBeltSettings, updateBeltSpeed, updateDistance, updatePushers } from "../persistence/beltSettings";
-import { setBeltSpeed } from "../core/timer";
 import { isPlcConnected, setPushersPlc } from "../hardware/plc";
 import { getScannerSettings } from "../persistence/deviceSettings";
 import { isTcpScannerActive } from "../input/tcp";
 import { isKeyboardListenerActive } from "../input/keyboard";
 import { writeBucket } from "../hardware/plc";
+import { setDelayTime } from "../core/bootstrap";
 
 type SystemStatusType= {
   plc?: { connected?: boolean; message?: string };
@@ -27,7 +27,7 @@ function buildSystemStatus(): SystemStatusType {
   };
   const scan = getScannerSettings();
   const mode = (scan.mode ?? "").trim().toLowerCase().replace(/\s+/g, "");
-  const tcpMode = mode === "tcp/telnet" || mode === "tcptelnet" || mode === "optimal";
+  const tcpMode = mode === "tcp/telnet";
   let scanner: SystemStatusType["scanner"];
   console.log(`Scanner mode: ${mode}, TCP mode: ${tcpMode}`);
   if (tcpMode) {
@@ -159,7 +159,7 @@ export function createHttpServer(clientDir: string): {
   app.put("/api/settings/belt-speed", async (req, res) => {
     try {
       updateBeltSpeed(req.body.speed);
-      setBeltSpeed(req.body.speed);
+      setDelayTime();
       return res.status(200).json({ result: true });
     } catch (err) {
       console.error("Belt speed error:", err);
@@ -170,6 +170,7 @@ export function createHttpServer(clientDir: string): {
   app.put("/api/settings/distance", async (req, res) => {
     try {
       updateDistance(req.body.distance);
+      setDelayTime();
       return res.status(200).json({ result: true });
     } catch (err) {
       console.error("Distance error:", err);

@@ -102,7 +102,7 @@ export function startPhotoEyeMonitor(): void {
   if (photoEyeMonitorRunning) return;
 
   photoEyeMonitorRunning = true;
-  const intervalMs = 50;
+  const intervalMs = 100;
 
   let lastPositionId: number | null = null;
 
