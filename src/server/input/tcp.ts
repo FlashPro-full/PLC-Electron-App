@@ -8,6 +8,8 @@ const COGNEX_TRIGGER_CMD = "||>TRIGGER ON\r\n";
 
 const MAX_OWED_TRIGGERS = 2;
 
+const CONTINUOUS_READ_MS = 100;
+
 const REMAINDER_BARCODE_MIN_LEN = 4;
 const REMAINDER_BARCODE_MAX_LEN = 256;
 
@@ -23,18 +25,49 @@ let owedTriggers = 0;
 let triggerAwaitingDrain = false;
 let lastTriggerWriteErrorLogSec = 0;
 
+let continuousReadRunning = false;
+
 function resetTriggerBackpressureState(): void {
   owedTriggers = 0;
   triggerAwaitingDrain = false;
 }
 
-function setScannerSettings(): void {
+function stopContinuousReadLoop(): void {
+  continuousReadRunning = false;
+}
+
+function startContinuousReadLoop(): void {
+  if (continuousReadRunning) {
+    return;
+  }
+  continuousReadRunning = true;
+  const intervalMs = CONTINUOUS_READ_MS;
+
+  const tick = (): void => {
+    if (!continuousReadRunning) {
+      return;
+    }
+    if (connected && socket && !socket.destroyed) {
+      if (!triggerAwaitingDrain) {
+        owedTriggers = Math.min(MAX_OWED_TRIGGERS, owedTriggers + 1);
+        tryFlushTriggerWrites();
+      }
+    }
+    setTimeout(tick, intervalMs);
+  };
+
+  if (connected && socket && !socket.destroyed) {
+    owedTriggers = Math.min(MAX_OWED_TRIGGERS, owedTriggers + 1);
+    tryFlushTriggerWrites();
+  }
+  setTimeout(tick, intervalMs);
+}
+
+export function setScannerSettings(): void {
   const s = getScannerSettings();
   scannerHost = s.ip?.trim() ?? null;
   scannerPort = s.port ?? null;
 }
-
-setScannerSettings();
 
 function clearReconnectTimer(): void {
   if (reconnectTimer !== null) {
@@ -155,11 +188,13 @@ function attachSocket(sock: net.Socket): void {
   sock.on("error", (err) => {
     console.error("[tcp] Socket error:", err);
     connected = false;
+    stopContinuousReadLoop();
     resetTriggerBackpressureState();
   });
 
   sock.on("close", () => {
     console.log("[tcp] Connection closed");
+    stopContinuousReadLoop();
     connected = false;
     resetTriggerBackpressureState();
 
@@ -180,6 +215,8 @@ function attachSocket(sock: net.Socket): void {
       reconnectTimer = setTimeout(connectToScanner, RECONNECT_MS);
     }
   });
+
+  startContinuousReadLoop();
 }
 
 async function connectScanner(
@@ -194,7 +231,6 @@ async function connectScanner(
       console.log(`[tcp] Successfully connected to ${host}:${port}`);
       connected = true;
       sock.setTimeout(0);
-      writeTriggerIfConnected();
       resolve();
     });
 
@@ -216,6 +252,7 @@ async function connectScanner(
 async function connectToScanner(): Promise<void> {
   try {
     clearReconnectTimer();
+    stopContinuousReadLoop();
 
     if (!slot) return;
 
@@ -256,6 +293,7 @@ export async function connectTcp(onBarcode: (barcode: string) => void): Promise<
 export function disconnectTcp(): void {
   console.log("[tcp] Disconnecting...");
   clearReconnectTimer();
+  stopContinuousReadLoop();
   resetTriggerBackpressureState();
 
   if (socket && !socket.destroyed) {

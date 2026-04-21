@@ -30,8 +30,6 @@ export function resolvedPurescan(): void {
   dataUrl = urls.data_url;
 }
 
-resolvedPurescan();
-
 export function resetPurescanSession(): void {
   token = null;
   refreshPromise = null;
