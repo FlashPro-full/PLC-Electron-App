@@ -12,8 +12,8 @@ let token: string | null = null;
 let refreshPromise: Promise<boolean> | null = null;
 let credential: { email: string; password: string } | null = null;
 let condition: boolean = false;
-let dataUrl: string | null = null;
 let loginUrl: string | null = null;
+let dataUrl: string | null = null;
 
 export function setCondition(): void {
   condition = getProductCondition();

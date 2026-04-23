@@ -1,6 +1,6 @@
 import {
   productBuffer,
-  pendingScanQueue,
+  tempQueue,
   MAX_PENDING_SCAN,
   eventQueue,
   enqueueEvent,
@@ -40,43 +40,66 @@ async function handleEvent(event: { type: string; payload: unknown; ts?: number 
   const payload = event.payload;
   const ts = event.ts ?? now;
 
-  if (eventType === "photo_eye") {
-    const positionId = payload as number | null;
-    if (positionId == null) {
-      return;
-    }
-    if (pendingScanQueue.length >= MAX_PENDING_SCAN) {
-      pendingScanQueue.shift();
-    }
-    pendingScanQueue.push({
-      barcode: "",
+  if (eventType === "barcode") {
+    const barcode = payload as string;
+
+    const item = {
+      barcode: barcode,
       start_time: ts,
-      positionId: positionId,
+      positionId: null,
       positionCm: null,
       pusher: null,
       label: null,
       distance: null,
       status: "pending",
       created_at: createdAtStr(),
-    });
+    };
+
+    if (tempQueue.length >= MAX_PENDING_SCAN) {
+      tempQueue.shift();
+    }
+
+    tempQueue.push(item);
+    productBuffer.set(barcode, item);
+    emitSocket("add_book", item);
+
+    void requestPurescan(barcode).then(
+      (response) => enqueueEvent("purescan_ok", { barcode, response }, nowSec()),
+      (error: unknown) =>
+        enqueueEvent("purescan_err", { barcode, error: String(error) }, nowSec())
+    );
     return;
   }
-  
-  if (eventType === "barcode") {
-    const barcode = payload as string;
 
-    if (pendingScanQueue.length > 0) {
-      const item = pendingScanQueue.shift()!;
-      item.barcode = barcode;
-      item.status = "fetching";
-      productBuffer.set(barcode, item);
-      emitSocket("add_book", item);
-      void requestPurescan(barcode).then(
-        (response) => enqueueEvent("purescan_ok", { barcode, response }, nowSec()),
-        (error: unknown) =>
-          enqueueEvent("purescan_err", { barcode, error: String(error) }, nowSec())
-      );
+  if (eventType === "photo_eye") {
+    const positionId = payload as number | null;
+    if (positionId == null) {
       return;
+    }
+
+    let emitData: productItem | null = null;
+
+    if(tempQueue.length > 0) {
+      const item = tempQueue.shift()!;
+      if(item) {
+        const barcode = item.barcode;
+        if (productBuffer.has(barcode)) {
+          const item = productBuffer.get(barcode)!;
+          item.start_time = ts;
+          item.positionId = positionId;
+          if (item.distance === null) {
+            item.status = "fetching";
+          } else {
+            item.status = "progress";
+            item.push_time = ts + (item.distance / beltSpeed);
+          }
+          emitData = { ...item };
+        }
+      }
+    }
+
+    if(emitData) {
+      emitSocket("update_book", emitData);
     }
 
     return;
@@ -162,8 +185,8 @@ async function onInterval100ms(): Promise<void> {
   const now = nowSec();
   await drainEvents(now);
 
-  while (pendingScanQueue.length > 0 && now - pendingScanQueue[0].start_time >= 3) {
-    pendingScanQueue.shift();
+  while (tempQueue.length > 0 && now - tempQueue[0].start_time >= 3) {
+    tempQueue.shift();
   }
 
   for (const [barcode, item] of productBuffer.entries()) {

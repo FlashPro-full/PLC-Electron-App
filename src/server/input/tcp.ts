@@ -4,11 +4,37 @@ import { getScannerSettings } from "../persistence/deviceSettings";
 const RECONNECT_MS = 3000;
 const MAX_BUFFER = 65536;
 
+const COGNEX_TRIGGER_CMD = "||>TRIGGER ON\r\n";
+
+const MAX_OWED_TRIGGERS = 2;
+
+const REMAINDER_BARCODE_MIN_LEN = 4;
+const REMAINDER_BARCODE_MAX_LEN = 256;
+
 let socket: net.Socket | null = null;
 let connected = false;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let slot: ((barcode: string) => void) | null = null;
 let lineBuffer = "";
+let scannerHost: string | null = null;
+let scannerPort: number | null = null;
+
+let owedTriggers = 0;
+let triggerAwaitingDrain = false;
+let lastTriggerWriteErrorLogSec = 0;
+
+function resetTriggerBackpressureState(): void {
+  owedTriggers = 0;
+  triggerAwaitingDrain = false;
+}
+
+function setScannerSettings(): void {
+  const s = getScannerSettings();
+  scannerHost = s.ip?.trim() ?? null;
+  scannerPort = s.port ?? null;
+}
+
+setScannerSettings();
 
 function clearReconnectTimer(): void {
   if (reconnectTimer !== null) {
@@ -17,23 +43,80 @@ function clearReconnectTimer(): void {
   }
 }
 
-function isLikelyDmccOrProtocolLine(line: string): boolean {
-  const t = line.trim();
-  if (t.length === 0) return true;
-  if (t.startsWith("||")) return true;
-  return false;
+function writeTriggerIfConnected(): void {
+  if (!connected || !socket || socket.destroyed) {
+    return;
+  }
+  owedTriggers = Math.min(MAX_OWED_TRIGGERS, owedTriggers + 1);
+  tryFlushTriggerWrites();
+}
+
+function tryFlushTriggerWrites(): void {
+  if (!connected || !socket || socket.destroyed) {
+    owedTriggers = 0;
+    triggerAwaitingDrain = false;
+    return;
+  }
+
+  try {
+    while (owedTriggers > 0) {
+      const ok = socket.write(COGNEX_TRIGGER_CMD);
+      if (ok === false) {
+        if (!triggerAwaitingDrain) {
+          triggerAwaitingDrain = true;
+          socket.once("drain", () => {
+            triggerAwaitingDrain = false;
+            tryFlushTriggerWrites();
+          });
+        }
+        return;
+      }
+      owedTriggers -= 1;
+    }
+  } catch (e) {
+    const now = Date.now() / 1000;
+    if (now - lastTriggerWriteErrorLogSec >= 5) {
+      lastTriggerWriteErrorLogSec = now;
+      console.error("[tcp] TRIGGER write failed:", e);
+    }
+    owedTriggers = 0;
+    triggerAwaitingDrain = false;
+  }
+}
+
+export function triggerScanner(): void {
+  writeTriggerIfConnected();
+}
+
+function looksLikeCompleteBarcodeRemainder(s: string): boolean {
+  const t = s.replace(/\0/g, "").trim();
+  if (t.length < REMAINDER_BARCODE_MIN_LEN || t.length > REMAINDER_BARCODE_MAX_LEN) {
+    return false;
+  }
+  if (t.startsWith("||")) {
+    return false;
+  }
+  if (/[\r\n]/.test(t)) {
+    return false;
+  }
+  for (let i = 0; i < t.length; i++) {
+    const c = t.charCodeAt(i);
+    if (c < 32 || c > 126) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function emitLine(raw: string): void {
   if (!slot) return;
   const barcode = raw.replace(/\0/g, "").replace(/\r$/, "").trim();
-  if (barcode.length === 0 || isLikelyDmccOrProtocolLine(barcode)) {
-    if (barcode.length > 0) {
-      console.log(`[tcp] Ignoring non-data line: ${barcode.slice(0, 120)}`);
-    }
+  if (barcode.length === 0) {
     return;
   }
-  console.log(`[tcp] Barcode received: ${barcode}`);
+  if (barcode.startsWith("||")) {
+    return;
+  }
   slot(barcode);
 }
 
@@ -59,36 +142,37 @@ function consumeBuffer(): void {
   }
 }
 
-export function triggerCognexAcquireOnce(): void {
-  if (!connected || !socket || socket.destroyed) {
-    return;
-  }
-  socket.write("||>TRIGGER ON\r\n");
-}
-
 function attachSocket(sock: net.Socket): void {
   sock.setEncoding("utf8");
 
   sock.setKeepAlive(true, 10000);
 
   sock.on("data", (chunk: string) => {
-    console.log(`[tcp] Raw data received (${chunk.length} bytes):`, chunk);
     lineBuffer += chunk;
     consumeBuffer();
   });
 
   sock.on("error", (err) => {
-    console.error("[tcp] Socket error:", err.message);
+    console.error("[tcp] Socket error:", err);
     connected = false;
+    resetTriggerBackpressureState();
   });
 
   sock.on("close", () => {
     console.log("[tcp] Connection closed");
     connected = false;
+    resetTriggerBackpressureState();
 
     if (lineBuffer.length > 0) {
-      emitLine(lineBuffer);
+      const remainder = lineBuffer.replace(/\0/g, "").trim();
       lineBuffer = "";
+      if (remainder.length > 0) {
+        if (looksLikeCompleteBarcodeRemainder(remainder)) {
+          emitLine(remainder);
+        } else if (!remainder.startsWith("||")) {
+          console.warn(`[tcp] Discarding incomplete TCP remainder on close (${remainder.slice(0, 120)})`);
+        }
+      }
     }
 
     if (slot) {
@@ -110,7 +194,7 @@ async function connectScanner(
       console.log(`[tcp] Successfully connected to ${host}:${port}`);
       connected = true;
       sock.setTimeout(0);
-      sock.write("||>TRIGGER ON\r\n");
+      writeTriggerIfConnected();
       resolve();
     });
 
@@ -121,7 +205,7 @@ async function connectScanner(
     });
 
     sock.once("error", (err) => {
-      console.error("[tcp] Connection error:", err.message);
+      console.error("[tcp] Connection error:", err);
       reject(err);
     });
 
@@ -133,19 +217,12 @@ async function connectToScanner(): Promise<void> {
   try {
     clearReconnectTimer();
 
-    if (!slot) {
-      console.log("[tcp] No callback registered, waiting...");
-      return;
-    }
+    if (!slot) return;
 
-    const s = getScannerSettings();
-    const host = s.ip?.trim() ?? "";
-    const port = s.port;
-
-    console.log(`[tcp] Attempting connection to ${host}:${port}`);
+    const host = scannerHost;
+    const port = scannerPort;
 
     if (!host || port == null || port < 1 || port > 65535) {
-      console.error(`[tcp] Invalid settings: host="${host}", port=${port}`);
       connected = false;
       reconnectTimer = setTimeout(connectToScanner, RECONNECT_MS);
       return;
@@ -157,16 +234,14 @@ async function connectToScanner(): Promise<void> {
     }
 
     lineBuffer = "";
+    resetTriggerBackpressureState();
     const sock = new net.Socket();
     socket = sock;
 
     await connectScanner(sock, port, host);
     attachSocket(sock);
   } catch (err) {
-    console.error(
-      "[tcp] Failed to connect to scanner:",
-      err instanceof Error ? err.message : err,
-    );
+    console.error("[tcp] Failed to connect to scanner:", err);
     connected = false;
     reconnectTimer = setTimeout(connectToScanner, RECONNECT_MS);
   }
@@ -181,6 +256,7 @@ export async function connectTcp(onBarcode: (barcode: string) => void): Promise<
 export function disconnectTcp(): void {
   console.log("[tcp] Disconnecting...");
   clearReconnectTimer();
+  resetTriggerBackpressureState();
 
   if (socket && !socket.destroyed) {
     socket.removeAllListeners();
