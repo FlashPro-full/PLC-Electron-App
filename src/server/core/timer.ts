@@ -150,10 +150,8 @@ async function handleEvent(event: { type: string; payload: unknown; ts?: number 
   }
 
   if (eventType === "purescan_err") {
-    const pl = payload as { barcode: string, error: string };
+    const pl = payload as { barcode: string };
     const barcode = pl.barcode;
-    const error = pl.error;
-    console.error(`Purescan error: ${error}`);
     let emitData: productItem | null = null;
     if (productBuffer.has(barcode)) {
       const b = productBuffer.get(barcode)!;

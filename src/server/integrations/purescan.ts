@@ -145,6 +145,7 @@ export async function requestPurescan(barcode: string): Promise<{ pusher: number
   if (!dataUrl) {
     return { reason: "Url not set" };
   }
+
   const scanUrl = dataUrl;
 
   let auth = token;
