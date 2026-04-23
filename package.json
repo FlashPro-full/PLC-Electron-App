@@ -8,7 +8,7 @@
   "scripts": {
     "build:client": "vite build --config src/client/vite.config.ts",
     "build:server": "tsc -p tsconfig.server.json",
-    "build:electron": "tsc -p tsconfig.electron.json",
+    "build:electron": "tsc -p tsconfig.electron.json && node scripts/copy-electron-icon.mjs",
     "build": "npm run build:client && npm run build:server && npm run build:electron",
     "start": "node dist/server/main.js",
     "dev": "tsx src/server/main.ts",
@@ -47,7 +47,9 @@
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8",
     "esbuild": "^0.24.0",
+    "png-to-ico": "^3.0.1",
     "postcss": "^8.5.8",
+    "resedit": "^3.0.2",
     "tailwindcss": "^4.2.2",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
@@ -58,7 +60,8 @@
     "appId": "com.plc.conveyor.desktop",
     "productName": "PLC Conveyor",
     "copyright": "Copyright © PLC",
-    "icon": "icon",
+    "icon": "build/icon.png",
+    "afterPack": "./scripts/patch-win-unpacked-icon.cjs",
     "directories": {
       "output": "out"
     },
