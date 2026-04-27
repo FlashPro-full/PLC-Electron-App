@@ -12,6 +12,7 @@ const CONTINUOUS_READ_MS = 100;
 
 const REMAINDER_BARCODE_MIN_LEN = 4;
 const REMAINDER_BARCODE_MAX_LEN = 256;
+const TCP_DEBUG_LISTENERS = process.env.DEBUG_TCP_LISTENERS === "1";
 
 let socket: net.Socket | null = null;
 let connected = false;
@@ -24,8 +25,29 @@ let scannerPort: number | null = null;
 let owedTriggers = 0;
 let triggerAwaitingDrain = false;
 let lastTriggerWriteErrorLogSec = 0;
+let lastTcpListenerDebugLogSec = 0;
 
 let continuousReadRunning = false;
+
+function disposeSocket(sock: net.Socket | null): void {
+  if (!sock) return;
+  try {
+    sock.removeAllListeners();
+  } catch {}
+  try {
+    sock.destroy();
+  } catch {}
+}
+
+function logTcpListenerCounts(tag: string, sock: net.Socket | null): void {
+  if (!TCP_DEBUG_LISTENERS || !sock) return;
+  const nowSec = Date.now() / 1000;
+  if (nowSec - lastTcpListenerDebugLogSec < 10) return;
+  lastTcpListenerDebugLogSec = nowSec;
+  console.log(
+    `[tcp] listeners(${tag}) data=${sock.listenerCount("data")} error=${sock.listenerCount("error")} close=${sock.listenerCount("close")} drain=${sock.listenerCount("drain")}`
+  );
+}
 
 function resetTriggerBackpressureState(): void {
   owedTriggers = 0;
@@ -183,10 +205,12 @@ function attachSocket(sock: net.Socket): void {
   sock.on("data", (chunk: string) => {
     lineBuffer += chunk;
     consumeBuffer();
+    logTcpListenerCounts("data", sock);
   });
 
   sock.on("error", (err) => {
     console.error("[tcp] Socket error:", err);
+    logTcpListenerCounts("error", sock);
     connected = false;
     stopContinuousReadLoop();
     resetTriggerBackpressureState();
@@ -194,6 +218,7 @@ function attachSocket(sock: net.Socket): void {
 
   sock.on("close", () => {
     console.log("[tcp] Connection closed");
+    logTcpListenerCounts("close", sock);
     stopContinuousReadLoop();
     connected = false;
     resetTriggerBackpressureState();
@@ -231,6 +256,7 @@ async function connectScanner(
       console.log(`[tcp] Successfully connected to ${host}:${port}`);
       connected = true;
       sock.setTimeout(0);
+      logTcpListenerCounts("connect", sock);
       resolve();
     });
 
@@ -265,10 +291,7 @@ async function connectToScanner(): Promise<void> {
       return;
     }
 
-    if (socket && !socket.destroyed) {
-      socket.removeAllListeners();
-      socket.destroy();
-    }
+    disposeSocket(socket);
 
     lineBuffer = "";
     resetTriggerBackpressureState();
@@ -279,6 +302,8 @@ async function connectToScanner(): Promise<void> {
     attachSocket(sock);
   } catch (err) {
     console.error("[tcp] Failed to connect to scanner:", err);
+    disposeSocket(socket);
+    socket = null;
     connected = false;
     reconnectTimer = setTimeout(connectToScanner, RECONNECT_MS);
   }
@@ -296,10 +321,7 @@ export function disconnectTcp(): void {
   stopContinuousReadLoop();
   resetTriggerBackpressureState();
 
-  if (socket && !socket.destroyed) {
-    socket.removeAllListeners();
-    socket.destroy();
-  }
+  disposeSocket(socket);
 
   socket = null;
   connected = false;

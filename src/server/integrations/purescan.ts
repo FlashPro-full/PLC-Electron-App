@@ -6,6 +6,8 @@ import { getProductCondition } from "../persistence/purescanSettings";
 const LOGIN_TIMEOUT_MS = 90_000;
 const LOGIN_RETRIES = 3;
 const LOGIN_RETRY_DELAY_MS = 5000;
+const PURESCAN_REQUEST_TIMEOUT_MS = 5000;
+const PURESCAN_MAX_IN_FLIGHT = 4;
 
 let pushers: Record<string, { label?: string; distance?: number }> = {};
 let token: string | null = null;
@@ -14,6 +16,8 @@ let credential: { email: string; password: string } | null = null;
 let condition: boolean = false;
 let loginUrl: string | null = null;
 let dataUrl: string | null = null;
+let inFlightPurescan = 0;
+const pendingPurescan: Array<() => void> = [];
 
 export function setCondition(): void {
   condition = getProductCondition();
@@ -43,6 +47,23 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function acquirePurescanSlot(): Promise<void> {
+  if (inFlightPurescan < PURESCAN_MAX_IN_FLIGHT) {
+    inFlightPurescan += 1;
+    return;
+  }
+  await new Promise<void>((resolve) => pendingPurescan.push(resolve));
+  inFlightPurescan += 1;
+}
+
+function releasePurescanSlot(): void {
+  inFlightPurescan = Math.max(0, inFlightPurescan - 1);
+  const next = pendingPurescan.shift();
+  if (next) {
+    next();
+  }
+}
+
 export async function initToken(): Promise<boolean> {
   if (!loginUrl || !credential) {
     console.log("No login url or credential");
@@ -51,18 +72,12 @@ export async function initToken(): Promise<boolean> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < LOGIN_RETRIES; attempt++) {
     try {
-      const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), LOGIN_TIMEOUT_MS);
-      try {
-        const res = await axios.post(loginUrl, credential);
-        if (res.data.result && res.data.token) {
-          token = res.data.token;
-          return true;
-        }
-        return false;
-      } finally {
-        clearTimeout(t);
+      const res = await axios.post(loginUrl, credential, { timeout: LOGIN_TIMEOUT_MS });
+      if (res.data.result && res.data.token) {
+        token = res.data.token;
+        return true;
       }
+      return false;
     } catch (e) {
       lastErr = e;
       if (attempt < LOGIN_RETRIES - 1) {
@@ -142,6 +157,8 @@ async function refreshTokenOnce(): Promise<boolean> {
 }
 
 export async function requestPurescan(barcode: string): Promise<{ pusher: number; label?: string; distance?: number } | { reason: string }> {
+  await acquirePurescanSlot();
+  try {
   if (!dataUrl) {
     return { reason: "Url not set" };
   }
@@ -155,21 +172,16 @@ export async function requestPurescan(barcode: string): Promise<{ pusher: number
   }
 
   const postOnce = async (bearer: string) => {
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 5000);
-    try {
-      return await axios.post(
-        scanUrl,
-        { barcode: barcode, condition: condition },
-        { 
-          headers: { 
-            Authorization: `Bearer ${bearer}` 
-          } 
+    return await axios.post(
+      scanUrl,
+      { barcode: barcode, condition: condition },
+      {
+        timeout: PURESCAN_REQUEST_TIMEOUT_MS,
+        headers: {
+          Authorization: `Bearer ${bearer}`
         }
-      );
-    } finally {
-      clearTimeout(t);
-    }
+      }
+    );
   };
 
   try {
@@ -202,5 +214,8 @@ export async function requestPurescan(barcode: string): Promise<{ pusher: number
       }
     }
     return { reason: "No response" };
+  }
+  } finally {
+    releasePurescanSlot();
   }
 }

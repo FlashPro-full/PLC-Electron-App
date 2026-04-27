@@ -7,16 +7,60 @@ let pushers: Record<string, { label?: string; distance?: number }> = {};
 
 const PLC_TIMEOUT_SEC = 5;
 const PHOTO_EYE_FAILURE_THRESHOLD = 3;
+const PLC_DEBUG_LISTENERS = process.env.DEBUG_PLC_LISTENERS === "1";
 
 let photoEyeCallback: ((positionId: number | null) => void) | null = null;
 let photoEyeMonitorRunning = false;
 let lastPhotoEyeErrorLog = 0;
 let reconnectInProgress = false;
+let plcRequestChain: Promise<void> = Promise.resolve();
+let lastListenerDebugLogSec = 0;
+
+function disposePlcClient(client: ModbusRTU | null): void {
+  if (!client) return;
+  const clientWithPort = client as ModbusRTU & { _port?: { removeAllListeners?: () => void; destroy?: () => void } };
+  try {
+    clientWithPort._port?.removeAllListeners?.();
+  } catch {}
+  try {
+    client.close();
+  } catch {}
+  try {
+    clientWithPort._port?.destroy?.();
+  } catch {}
+}
+
+function logPlcListenerCounts(tag: string): void {
+  if (!PLC_DEBUG_LISTENERS || !plc) return;
+  const nowSec = Date.now() / 1000;
+  if (nowSec - lastListenerDebugLogSec < 10) return;
+  lastListenerDebugLogSec = nowSec;
+  const clientWithPort = plc as ModbusRTU & {
+    _port?: { listenerCount?: (eventName: string) => number };
+  };
+  const dataCount = clientWithPort._port?.listenerCount?.("data") ?? 0;
+  const errorCount = clientWithPort._port?.listenerCount?.("error") ?? 0;
+  const closeCount = clientWithPort._port?.listenerCount?.("close") ?? 0;
+  console.log(`[plc] listeners(${tag}) data=${dataCount} error=${errorCount} close=${closeCount}`);
+}
+
+async function runPlcRequest<T>(task: () => Promise<T>): Promise<T> {
+  const previous = plcRequestChain;
+  let release!: () => void;
+  plcRequestChain = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  await previous;
+  try {
+    return await task();
+  } finally {
+    release();
+  }
+}
 
 export function resetPlcConnection(): void {
-  if (plc?.isOpen) {
-    plc.close();
-  }
+  disposePlcClient(plc);
   plc = null;
 }
 
@@ -36,6 +80,10 @@ export async function connectPlc(): Promise<ModbusRTU | null> {
     return plc;
   }
   reconnectInProgress = true;
+  if (plc) {
+    disposePlcClient(plc);
+    plc = null;
+  }
   const client = new ModbusRTU();
   try {
     await client.connectTCP(ip, {
@@ -45,10 +93,11 @@ export async function connectPlc(): Promise<ModbusRTU | null> {
     client.setID(1);
     plc = client;
     console.log("Connected to PLC");
+    logPlcListenerCounts("connect");
     return client;
   } catch(err) {
     console.error("Modbus connect error:", err);
-    client.close();
+    disposePlcClient(client);
     plc = null;
     return null;
   } finally {
@@ -66,20 +115,23 @@ export async function isPhotoEyeConnected(): Promise<boolean> {
 }
 
 export async function readPhotoEye(): Promise<number | null> {
-  if (!plc || !plc?.isOpen) plc = await connectPlc();
-  if (!plc || !plc?.isOpen) return null;
+  return runPlcRequest<number | null>(async () => {
+    if (!plc || !plc?.isOpen) plc = await connectPlc();
+    if (!plc || !plc?.isOpen) return null;
 
-  try {
-    const result = await plc.readHoldingRegisters(0x0000, 1);
-    if (result?.data && result.data.length > 0) {
-      return result.data[0];
+    try {
+      const result = await plc.readHoldingRegisters(0x0000, 1);
+      logPlcListenerCounts("read");
+      if (result?.data && result.data.length > 0) {
+        return result.data[0];
+      }
+      return null;
+    } catch (err) {
+      console.error("Modbus read error:", err);
+      resetPlcConnection();
+      return null;
     }
-    return null;
-  } catch (err) {
-    console.error("Modbus read error:", err);
-    resetPlcConnection();
-    return null;
-  }
+  });
 }
 
 export async function writeBucket(pusher: number): Promise<boolean> {
@@ -93,17 +145,19 @@ export async function writeBucket(pusher: number): Promise<boolean> {
     return true;
   }
 
-  if(!plc || !plc?.isOpen) plc = await connectPlc();
-  if (!plc || !plc?.isOpen) return false;
+  return runPlcRequest<boolean>(async () => {
+    if(!plc || !plc?.isOpen) plc = await connectPlc();
+    if (!plc || !plc?.isOpen) return false;
 
-  try {
-    await plc.writeRegister(0x0001, pusher);
-    return true;
-  } catch (err) {
-    console.error("Modbus write error:", err);
-    resetPlcConnection();
-    return false;
-  }
+    try {
+      await plc.writeRegister(0x0001, pusher);
+      return true;
+    } catch (err) {
+      console.error("Modbus write error:", err);
+      resetPlcConnection();
+      return false;
+    }
+  });
 }
 
 export function connectPhotoEyeSignal(cb: (positionId: number | null) => void): void {

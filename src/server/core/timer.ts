@@ -12,6 +12,9 @@ import { requestPurescan } from "../integrations/purescan";
 
 const INTERVAL_MS = 100;
 const MAX_EVENTS_PER_TICK = 300;
+const MIN_PENDING_SCAN_TIMEOUT_SEC = 8;
+const MAX_PENDING_SCAN_TIMEOUT_SEC = 45;
+const DEFAULT_PENDING_SCAN_TIMEOUT_SEC = 15;
 
 let timerStarted = false;
 let lastErrorLog = 0;
@@ -33,6 +36,14 @@ function createdAtStr(): string {
 
 function effectiveBeltSpeed(): number {
   return beltSpeed > 0 ? beltSpeed : 1e-6;
+}
+
+function pendingScanTimeoutSec(): number {
+  if (beltSpeed <= 0) {
+    return DEFAULT_PENDING_SCAN_TIMEOUT_SEC;
+  }
+  const dynamic = 3 + (120 / beltSpeed);
+  return Math.max(MIN_PENDING_SCAN_TIMEOUT_SEC, Math.min(MAX_PENDING_SCAN_TIMEOUT_SEC, dynamic));
 }
 
 async function handleEvent(event: { type: string; payload: unknown; ts?: number }, now: number): Promise<void> {
@@ -183,7 +194,8 @@ async function onInterval100ms(): Promise<void> {
   const now = nowSec();
   await drainEvents(now);
 
-  while (tempQueue.length > 0 && now - tempQueue[0].start_time >= 3) {
+  const pendingTimeoutSec = pendingScanTimeoutSec();
+  while (tempQueue.length > 0 && now - tempQueue[0].start_time >= pendingTimeoutSec) {
     tempQueue.shift();
   }
 
