@@ -6,10 +6,12 @@ let plc: ModbusRTU | null = null;
 let pushers: Record<string, { label?: string; distance?: number }> = {};
 
 const PLC_TIMEOUT_SEC = 5;
+const PHOTO_EYE_FAILURE_THRESHOLD = 3;
 
 let photoEyeCallback: ((positionId: number | null) => void) | null = null;
 let photoEyeMonitorRunning = false;
 let lastPhotoEyeErrorLog = 0;
+let reconnectInProgress = false;
 
 export function resetPlcConnection(): void {
   if (plc?.isOpen) {
@@ -27,9 +29,13 @@ export async function connectPlc(): Promise<ModbusRTU | null> {
   if (!ip) {
     return null;
   }
-  if (plc?.isOpen) {
-    return null;
+  if (reconnectInProgress) {
+    return plc;
   }
+  if (plc?.isOpen) {
+    return plc;
+  }
+  reconnectInProgress = true;
   const client = new ModbusRTU();
   try {
     await client.connectTCP(ip, {
@@ -45,6 +51,8 @@ export async function connectPlc(): Promise<ModbusRTU | null> {
     client.close();
     plc = null;
     return null;
+  } finally {
+    reconnectInProgress = false;
   }
 }
 
@@ -59,15 +67,17 @@ export async function isPhotoEyeConnected(): Promise<boolean> {
 
 export async function readPhotoEye(): Promise<number | null> {
   if (!plc || !plc?.isOpen) plc = await connectPlc();
+  if (!plc || !plc?.isOpen) return null;
 
   try {
-    const result = await plc?.readHoldingRegisters(0x0000, 1);
+    const result = await plc.readHoldingRegisters(0x0000, 1);
     if (result?.data && result.data.length > 0) {
       return result.data[0];
     }
     return null;
   } catch (err) {
     console.error("Modbus read error:", err);
+    resetPlcConnection();
     return null;
   }
 }
@@ -84,12 +94,14 @@ export async function writeBucket(pusher: number): Promise<boolean> {
   }
 
   if(!plc || !plc?.isOpen) plc = await connectPlc();
+  if (!plc || !plc?.isOpen) return false;
 
   try {
-    await plc?.writeRegister(0x0001, pusher);
+    await plc.writeRegister(0x0001, pusher);
     return true;
   } catch (err) {
     console.error("Modbus write error:", err);
+    resetPlcConnection();
     return false;
   }
 }
@@ -105,6 +117,9 @@ export function startPhotoEyeMonitor(): void {
   const intervalMs = 100;
 
   let lastPositionId: number | null = null;
+  let consecutiveReadFailures = 0;
+  let reconnectDelayMs = 100;
+  const maxReconnectDelayMs = 5000;
 
   const tick = async () => {
     if (!photoEyeMonitorRunning) return;
@@ -113,22 +128,43 @@ export function startPhotoEyeMonitor(): void {
       if (!plc || !plc?.isOpen) {
         plc = await connectPlc();
       }
-      
-      const positionId = await readPhotoEye();
 
-      if (positionId !== null && lastPositionId !== null && positionId !== lastPositionId) {
-        photoEyeCallback?.(positionId);
+      if (!plc || !plc?.isOpen) {
+        reconnectDelayMs = Math.min(reconnectDelayMs * 2, maxReconnectDelayMs);
+        setTimeout(tick, reconnectDelayMs);
+        return;
       }
 
-      lastPositionId = positionId;
+      const positionId = await readPhotoEye();
+      if (positionId === null) {
+        consecutiveReadFailures += 1;
+        if (consecutiveReadFailures >= PHOTO_EYE_FAILURE_THRESHOLD) {
+          resetPlcConnection();
+          reconnectDelayMs = Math.min(reconnectDelayMs * 2, maxReconnectDelayMs);
+        }
+        setTimeout(tick, Math.max(intervalMs, reconnectDelayMs));
+        return;
+      }
+      consecutiveReadFailures = 0;
+
+      if (lastPositionId !== null && positionId !== lastPositionId) {
+        photoEyeCallback?.(positionId);
+        lastPositionId = positionId;
+      } else if (lastPositionId === null) {
+        photoEyeCallback?.(positionId);
+        lastPositionId = positionId;
+      }
+      reconnectDelayMs = 100;
     } catch {
+      resetPlcConnection();
       const now = Date.now() / 1000;
       if (now - lastPhotoEyeErrorLog >= 30) {
         lastPhotoEyeErrorLog = now;
         console.error("Photo eye monitor loop error (PLC may be disconnected)");
       }
+      reconnectDelayMs = Math.min(reconnectDelayMs * 2, maxReconnectDelayMs);
     }
-    setTimeout(tick, intervalMs);
+    setTimeout(tick, Math.max(intervalMs, reconnectDelayMs));
   };
 
   setTimeout(tick, intervalMs);
