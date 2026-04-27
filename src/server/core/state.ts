@@ -14,7 +14,7 @@ export interface productItem {
 }
 
 export const productBuffer = new Map<string, productItem>();
-export const pendingScanQueue: productItem[] = [];
+export const tempQueue: productItem[] = [];
 export const MAX_PENDING_SCAN = 16;
 export const eventQueue: Array<{ type: string; payload: unknown; ts?: number }> = [];
 

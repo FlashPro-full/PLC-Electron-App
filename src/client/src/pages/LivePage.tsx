@@ -52,7 +52,7 @@ export function LivePage() {
   }, []);
 
   const handleNewToggle = async () => {
-    const res = await axios.post("/api/toggle-new-used", !newMode);
+    const res = await axios.post("/api/toggle-new-used", { condition: !newMode });
     if (res.data.result) {
       setNewMode((prev) => !prev);
     }

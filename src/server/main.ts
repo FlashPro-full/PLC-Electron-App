@@ -6,6 +6,7 @@ import { disconnectTcp } from "./input/tcp";
 import { ensureBeltSettingsFile } from "./persistence/beltSettings";
 import { ensureDeviceSettingsFile } from "./persistence/deviceSettings";
 import { ensurePurescanSettingsFile } from "./persistence/purescanSettings";
+import { resolvedPurescan } from "./integrations/purescan";
 
 function resolveRoot(): string {
   return process.env.PLC_APP_ROOT || process.cwd();
@@ -22,6 +23,7 @@ const port = 5049;
 ensureBeltSettingsFile();
 ensureDeviceSettingsFile();
 ensurePurescanSettingsFile();
+resolvedPurescan();
 
 export async function runServer(): Promise<void> {
   const { server } = createHttpServer(clientDir);
