@@ -7,7 +7,7 @@ import {
   type productItem,
 } from "./state";
 import { emitSocket } from "./runtime";
-import { writeBucket } from "../hardware/plc";
+import { markBarcodeActivity, writeBucket } from "../hardware/plc";
 import { requestPurescan } from "../integrations/purescan";
 
 const INTERVAL_MS = 100;
@@ -53,6 +53,7 @@ async function handleEvent(event: { type: string; payload: unknown; ts?: number 
 
   if (eventType === "barcode") {
     const barcode = payload as string;
+    markBarcodeActivity();
 
     const item = {
       barcode: barcode,

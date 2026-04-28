@@ -10,6 +10,11 @@ let lastPositionId: number | null = null;
 
 let photoEyeCallback: ((positionId: number | null) => void) | null = null;
 let photoEyeMonitorRunning = false;
+let photoEyeMonitorToken = 0;
+let lastBarcodeActivityAt = 0;
+
+const PHOTO_EYE_MISS_THRESHOLD = 3;
+const BARCODE_ACTIVITY_WINDOW_MS = 5000;
 
 export function resetPlcConnection(): void {
   plc = null;
@@ -103,14 +108,33 @@ export async function connectPhotoEyeSignal(cb: (positionId: number | null) => v
   startPhotoEyeMonitor();
 }
 
+export function markBarcodeActivity(): void {
+  lastBarcodeActivityAt = Date.now();
+}
+
+export function stopPhotoEyeMonitor(): void {
+  photoEyeMonitorRunning = false;
+  photoEyeMonitorToken += 1;
+}
+
 export function startPhotoEyeMonitor(): void {
   if (photoEyeMonitorRunning) return;
 
   photoEyeMonitorRunning = true;
+  const monitorToken = ++photoEyeMonitorToken;
   const intervalMs = 100;
+  let consecutiveMisses = 0;
+
+  const restartLoop = () => {
+    if (!photoEyeMonitorRunning || monitorToken !== photoEyeMonitorToken) return;
+    photoEyeMonitorRunning = false;
+    setTimeout(() => {
+      startPhotoEyeMonitor();
+    }, intervalMs);
+  };
 
   const tick = async () => {
-    if (!photoEyeMonitorRunning) return;
+    if (!photoEyeMonitorRunning || monitorToken !== photoEyeMonitorToken) return;
 
     try {
       if (!plc || !plc?.isOpen) {
@@ -118,15 +142,25 @@ export function startPhotoEyeMonitor(): void {
       }
 
       if (!plc || !plc?.isOpen) {
+        consecutiveMisses = 0;
         return;
       }
 
       const positionId = await readPhotoEye();
       
       if (positionId === null) {
+        consecutiveMisses += 1;
         resetPlcConnection();
+        if (
+          consecutiveMisses >= PHOTO_EYE_MISS_THRESHOLD &&
+          Date.now() - lastBarcodeActivityAt <= BARCODE_ACTIVITY_WINDOW_MS
+        ) {
+          restartLoop();
+          return;
+        }
         return;
       }
+      consecutiveMisses = 0;
 
       if (lastPositionId !== null && positionId !== lastPositionId) {
         photoEyeCallback?.(positionId);
@@ -137,7 +171,9 @@ export function startPhotoEyeMonitor(): void {
       resetPlcConnection();
       console.error("Photo eye monitor loop error");
     } finally {
-      setTimeout(tick, intervalMs);
+      if (photoEyeMonitorRunning && monitorToken === photoEyeMonitorToken) {
+        setTimeout(tick, intervalMs);
+      }
     }
   };
 
