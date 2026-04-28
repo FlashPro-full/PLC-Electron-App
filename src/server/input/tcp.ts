@@ -309,13 +309,13 @@ async function connectToScanner(): Promise<void> {
   }
 }
 
-export async function connectTcp(onBarcode: (barcode: string) => void): Promise<void> {
+export async function connectCognex(onBarcode: (barcode: string) => void): Promise<void> {
   console.log("[tcp] Initializing TCP connection to Cognex scanner...");
   slot = onBarcode;
   await connectToScanner();
 }
 
-export function disconnectTcp(): void {
+export function disconnectCognex(): void {
   console.log("[tcp] Disconnecting...");
   clearReconnectTimer();
   stopContinuousReadLoop();

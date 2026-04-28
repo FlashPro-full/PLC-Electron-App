@@ -12,9 +12,6 @@ import { requestPurescan } from "../integrations/purescan";
 
 const INTERVAL_MS = 100;
 const MAX_EVENTS_PER_TICK = 300;
-const MIN_PENDING_SCAN_TIMEOUT_SEC = 8;
-const MAX_PENDING_SCAN_TIMEOUT_SEC = 45;
-const DEFAULT_PENDING_SCAN_TIMEOUT_SEC = 15;
 
 let timerStarted = false;
 let lastErrorLog = 0;
@@ -38,14 +35,6 @@ function effectiveBeltSpeed(): number {
   return beltSpeed > 0 ? beltSpeed : 1e-6;
 }
 
-function pendingScanTimeoutSec(): number {
-  if (beltSpeed <= 0) {
-    return DEFAULT_PENDING_SCAN_TIMEOUT_SEC;
-  }
-  const dynamic = 3 + (120 / beltSpeed);
-  return Math.max(MIN_PENDING_SCAN_TIMEOUT_SEC, Math.min(MAX_PENDING_SCAN_TIMEOUT_SEC, dynamic));
-}
-
 async function handleEvent(event: { type: string; payload: unknown; ts?: number }, now: number): Promise<void> {
   const eventType = event.type;
   const payload = event.payload;
@@ -53,6 +42,11 @@ async function handleEvent(event: { type: string; payload: unknown; ts?: number 
 
   if (eventType === "barcode") {
     const barcode = payload as string;
+
+    if (productBuffer.has(barcode)) {
+      return;
+    }
+
     markBarcodeActivity();
 
     const item = {
@@ -92,7 +86,7 @@ async function handleEvent(event: { type: string; payload: unknown; ts?: number 
     let emitData: productItem | null = null;
 
     if(tempQueue.length > 0) {
-      const item = tempQueue.shift()!;
+      const item = tempQueue.pop();
       if(item) {
         const barcode = item.barcode;
         if (productBuffer.has(barcode)) {
@@ -103,7 +97,7 @@ async function handleEvent(event: { type: string; payload: unknown; ts?: number 
             item.status = "fetching";
           } else {
             item.status = "progress";
-            item.push_time = ts + (item.distance / beltSpeed);
+            item.push_time = ts + (item.distance / effectiveBeltSpeed());
           }
           emitData = { ...item };
         }
@@ -130,6 +124,7 @@ async function handleEvent(event: { type: string; payload: unknown; ts?: number 
         const b = productBuffer.get(barcode)!;
         b.status = "moving";
         b.label = response.reason;
+        b.positionId = b.positionId ?? null;
         emitData = { ...b };
       }
       if (emitData) {
@@ -149,9 +144,9 @@ async function handleEvent(event: { type: string; payload: unknown; ts?: number 
       b.pusher = pusher ?? null;
       b.label = label ?? null;
       b.distance = distance ?? null;
-      if (distance != null && b.positionId != null) {
+      if (b.status === "fetching") {
         b.status = "progress";
-        b.push_time = b.start_time + distance / effectiveBeltSpeed();
+        b.push_time = b.start_time + (distance ?? 0) / effectiveBeltSpeed();
       }
       emitData = { ...b };
     }
@@ -169,6 +164,7 @@ async function handleEvent(event: { type: string; payload: unknown; ts?: number 
       const b = productBuffer.get(barcode)!;
       b.status = "moving";
       b.label = "No Response";
+      b.positionId = b.positionId ?? null;
       emitData = { ...b };
     }
     if (emitData) {
@@ -195,16 +191,14 @@ async function onInterval100ms(): Promise<void> {
   const now = nowSec();
   await drainEvents(now);
 
-  const pendingTimeoutSec = pendingScanTimeoutSec();
-  while (tempQueue.length > 0 && now - tempQueue[0].start_time >= pendingTimeoutSec) {
-    tempQueue.shift();
+  while (tempQueue.length > 0 && now - tempQueue[0].start_time >= 1) {
+    const barcode = tempQueue.shift()!.barcode;
+    if (productBuffer.has(barcode)) {
+      productBuffer.delete(barcode);
+    }
   }
 
   for (const [barcode, item] of productBuffer.entries()) {
-    if (now - item.start_time > 60) {
-      productBuffer.delete(barcode);
-      continue;
-    }
     const label = item.label;
     const labelIsNone = typeof label === "string" && label.trim().toLowerCase() === "none";
     if (

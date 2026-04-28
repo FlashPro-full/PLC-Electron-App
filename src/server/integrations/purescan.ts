@@ -7,7 +7,6 @@ const LOGIN_TIMEOUT_MS = 90_000;
 const LOGIN_RETRIES = 3;
 const LOGIN_RETRY_DELAY_MS = 5000;
 const PURESCAN_REQUEST_TIMEOUT_MS = 5000;
-const PURESCAN_MAX_IN_FLIGHT = 4;
 
 let pushers: Record<string, { label?: string; distance?: number }> = {};
 let token: string | null = null;
@@ -16,8 +15,6 @@ let credential: { email: string; password: string } | null = null;
 let condition: boolean = false;
 let loginUrl: string | null = null;
 let dataUrl: string | null = null;
-let inFlightPurescan = 0;
-const pendingPurescan: Array<() => void> = [];
 
 export function setCondition(): void {
   condition = getProductCondition();
@@ -34,34 +31,12 @@ export function resolvedPurescan(): void {
   dataUrl = urls.data_url;
 }
 
-export function resetPurescanSession(): void {
-  token = null;
-  refreshPromise = null;
-}
-
 export function setPushersPurescan(): void {
   pushers = getPushers();
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
-}
-
-async function acquirePurescanSlot(): Promise<void> {
-  if (inFlightPurescan < PURESCAN_MAX_IN_FLIGHT) {
-    inFlightPurescan += 1;
-    return;
-  }
-  await new Promise<void>((resolve) => pendingPurescan.push(resolve));
-  inFlightPurescan += 1;
-}
-
-function releasePurescanSlot(): void {
-  inFlightPurescan = Math.max(0, inFlightPurescan - 1);
-  const next = pendingPurescan.shift();
-  if (next) {
-    next();
-  }
 }
 
 export async function initToken(): Promise<boolean> {
@@ -157,8 +132,6 @@ async function refreshTokenOnce(): Promise<boolean> {
 }
 
 export async function requestPurescan(barcode: string): Promise<{ pusher: number; label?: string; distance?: number } | { reason: string }> {
-  await acquirePurescanSlot();
-  try {
   if (!dataUrl) {
     return { reason: "Url not set" };
   }
@@ -214,8 +187,5 @@ export async function requestPurescan(barcode: string): Promise<{ pusher: number
       }
     }
     return { reason: "No response" };
-  }
-  } finally {
-    releasePurescanSlot();
   }
 }

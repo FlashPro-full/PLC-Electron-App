@@ -16,7 +16,7 @@ let lastBarcodeActivityAt = 0;
 const PHOTO_EYE_MISS_THRESHOLD = 3;
 const BARCODE_ACTIVITY_WINDOW_MS = 5000;
 
-export function resetPlcConnection(): void {
+function resetPlcConnection(): void {
   plc = null;
 }
 
@@ -102,7 +102,7 @@ export async function writeBucket(pusher: number): Promise<boolean> {
   }
 }
 
-export async function connectPhotoEyeSignal(cb: (positionId: number | null) => void): Promise<void> {
+export async function connectPhotoEye(cb: (positionId: number | null) => void): Promise<void> {
   photoEyeCallback = cb;
   lastPositionId = await readPhotoEye();
   startPhotoEyeMonitor();
@@ -110,11 +110,6 @@ export async function connectPhotoEyeSignal(cb: (positionId: number | null) => v
 
 export function markBarcodeActivity(): void {
   lastBarcodeActivityAt = Date.now();
-}
-
-export function stopPhotoEyeMonitor(): void {
-  photoEyeMonitorRunning = false;
-  photoEyeMonitorToken += 1;
 }
 
 export function startPhotoEyeMonitor(): void {
