@@ -27,7 +27,7 @@ function buildSystemStatus(): SystemStatusType {
   };
   const scan = getScannerSettings();
   const mode = (scan.mode ?? "").trim().toLowerCase().replace(/\s+/g, "");
-  const tcpMode = mode === "tcp/telnet" || mode === "tcptelnet" || mode === "optimal";
+  const tcpMode = mode === "tcp/telnet";
   let scanner: SystemStatusType["scanner"];
   console.log(`Scanner mode: ${mode}, TCP mode: ${tcpMode}`);
   if (tcpMode) {

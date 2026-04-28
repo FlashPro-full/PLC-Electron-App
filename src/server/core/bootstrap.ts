@@ -1,6 +1,6 @@
 import type { Server } from "socket.io";
 import { enqueueEvent } from "./state";
-import { connectPlc, connectPhotoEyeSignal, startPhotoEyeMonitor, setPushersPlc } from "../hardware/plc";
+import { setPlcConnection, connectPhotoEyeSignal, setPushersPlc } from "../hardware/plc";
 import { setPushersPurescan } from "../integrations/purescan";
 import { configureRuntime } from "./runtime";
 import { startIntervalTimer } from "./timer";
@@ -37,7 +37,7 @@ export async function bootstrapBackend(io: Server): Promise<void> {
   if (bootstrapped) return;
   bootstrapped = true;
 
-  await connectPlc();
+  await setPlcConnection();
   setScannerMode();
   setBeltSpeed(getBeltSpeed());
   setPushersPlc();
@@ -50,13 +50,12 @@ export async function bootstrapBackend(io: Server): Promise<void> {
     await connectKeyboard(onScanned);
   }
 
-  connectPhotoEyeSignal((positionId: number | null) => {
+  await connectPhotoEyeSignal((positionId: number | null) => {
     console.log(`positionId: ${positionId}`);
     enqueueEvent("photo_eye", positionId, nowSec());
   });
 
   configureRuntime(io);
 
-  startPhotoEyeMonitor();
   startIntervalTimer();
 }
