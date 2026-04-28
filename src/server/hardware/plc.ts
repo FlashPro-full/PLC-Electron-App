@@ -10,13 +10,8 @@ let lastPositionId: number | null = null;
 
 let photoEyeCallback: ((positionId: number | null) => void) | null = null;
 let photoEyeMonitorRunning = false;
-let photoEyeMonitorToken = 0;
-let lastBarcodeActivityAt = 0;
 
-const PHOTO_EYE_MISS_THRESHOLD = 3;
-const BARCODE_ACTIVITY_WINDOW_MS = 5000;
-
-function resetPlcConnection(): void {
+function resetPlc(): void {
   plc = null;
 }
 
@@ -46,7 +41,7 @@ async function connectPlc(): Promise<ModbusRTU | null> {
   }
 }
 
-export async function setPlcConnection(): Promise<void> {
+export async function setPlc(): Promise<void> {
   if (plc) return;
   plc = await connectPlc();
   if (!plc) throw new Error("Failed to connect to PLC");
@@ -73,7 +68,7 @@ export async function readPhotoEye(): Promise<number | null> {
     return null;
   } catch (err) {
     console.error("Modbus read error:", err);
-    resetPlcConnection();
+    resetPlc();
     return null;
   }
 }
@@ -97,7 +92,7 @@ export async function writeBucket(pusher: number): Promise<boolean> {
     return true;
   } catch (err) {
     console.error("Modbus write error:", err);
-    resetPlcConnection();
+    resetPlc();
     return false;
   }
 }
@@ -108,28 +103,15 @@ export async function connectPhotoEye(cb: (positionId: number | null) => void): 
   startPhotoEyeMonitor();
 }
 
-export function markBarcodeActivity(): void {
-  lastBarcodeActivityAt = Date.now();
-}
-
 export function startPhotoEyeMonitor(): void {
   if (photoEyeMonitorRunning) return;
 
   photoEyeMonitorRunning = true;
-  const monitorToken = ++photoEyeMonitorToken;
   const intervalMs = 100;
-  let consecutiveMisses = 0;
-
-  const restartLoop = () => {
-    if (!photoEyeMonitorRunning || monitorToken !== photoEyeMonitorToken) return;
-    photoEyeMonitorRunning = false;
-    setTimeout(() => {
-      startPhotoEyeMonitor();
-    }, intervalMs);
-  };
 
   const tick = async () => {
-    if (!photoEyeMonitorRunning || monitorToken !== photoEyeMonitorToken) return;
+    console.log("here: ", photoEyeMonitorRunning, plc?.isOpen);
+    if (!photoEyeMonitorRunning) return;
 
     try {
       if (!plc || !plc?.isOpen) {
@@ -137,25 +119,16 @@ export function startPhotoEyeMonitor(): void {
       }
 
       if (!plc || !plc?.isOpen) {
-        consecutiveMisses = 0;
         return;
       }
 
       const positionId = await readPhotoEye();
       
       if (positionId === null) {
-        consecutiveMisses += 1;
-        resetPlcConnection();
-        if (
-          consecutiveMisses >= PHOTO_EYE_MISS_THRESHOLD &&
-          Date.now() - lastBarcodeActivityAt <= BARCODE_ACTIVITY_WINDOW_MS
-        ) {
-          restartLoop();
-          return;
-        }
-        return;
+        resetPlc();
+        photoEyeMonitorRunning = false;
+        return startPhotoEyeMonitor();
       }
-      consecutiveMisses = 0;
 
       if (lastPositionId !== null && positionId !== lastPositionId) {
         photoEyeCallback?.(positionId);
@@ -163,12 +136,10 @@ export function startPhotoEyeMonitor(): void {
 
       lastPositionId = positionId;
     } catch {
-      resetPlcConnection();
+      resetPlc();
       console.error("Photo eye monitor loop error");
     } finally {
-      if (photoEyeMonitorRunning && monitorToken === photoEyeMonitorToken) {
-        setTimeout(tick, intervalMs);
-      }
+      setTimeout(tick, intervalMs);
     }
   };
 

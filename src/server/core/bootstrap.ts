@@ -1,6 +1,6 @@
 import type { Server } from "socket.io";
 import { enqueueEvent } from "./state";
-import { setPlcConnection, connectPhotoEye, setPushersPlc } from "../hardware/plc";
+import { setPlc, connectPhotoEye, setPushersPlc } from "../hardware/plc";
 import { setPushersPurescan } from "../integrations/purescan";
 import { configureRuntime } from "./runtime";
 import { startIntervalTimer } from "./timer";
@@ -37,7 +37,7 @@ export async function bootstrapBackend(io: Server): Promise<void> {
   if (bootstrapped) return;
 
   try {
-    await setPlcConnection();
+    await setPlc();
     setScannerMode();
     setBeltSpeed(getBeltSpeed());
     setPushersPlc();

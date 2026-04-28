@@ -172,6 +172,9 @@ function emitLine(raw: string): void {
   if (barcode.startsWith("||")) {
     return;
   }
+  if (!looksLikeCompleteBarcodeRemainder(barcode)) {
+    return;
+  }
   slot(barcode);
 }
 

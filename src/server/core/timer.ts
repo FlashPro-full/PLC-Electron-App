@@ -7,7 +7,7 @@ import {
   type productItem,
 } from "./state";
 import { emitSocket } from "./runtime";
-import { markBarcodeActivity, writeBucket } from "../hardware/plc";
+import { writeBucket } from "../hardware/plc";
 import { requestPurescan } from "../integrations/purescan";
 
 const INTERVAL_MS = 100;
@@ -46,8 +46,6 @@ async function handleEvent(event: { type: string; payload: unknown; ts?: number 
     if (productBuffer.has(barcode)) {
       return;
     }
-
-    markBarcodeActivity();
 
     const item = {
       barcode: barcode,
@@ -191,7 +189,7 @@ async function onInterval100ms(): Promise<void> {
   const now = nowSec();
   await drainEvents(now);
 
-  while (tempQueue.length > 0 && now - tempQueue[0].start_time >= 1) {
+  while (tempQueue.length > 0 && now - tempQueue[0].start_time >= 1.5) {
     const barcode = tempQueue.shift()!.barcode;
     if (productBuffer.has(barcode)) {
       productBuffer.delete(barcode);
