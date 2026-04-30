@@ -5,6 +5,7 @@ import { getPLCSettings } from "../persistence/deviceSettings";
 const PLC_TIMEOUT_SEC = 5;
 const PLC_HEALTH_LOG_MS = 30_000;
 const PLC_SLOW_READ_WARN_MS = 1_000;
+const PLC_READ_TIMEOUT_MS = 1_500;
 
 let plc: ModbusRTU | null = null;
 let pushers: Record<string, { label?: string; distance?: number }> = {};
@@ -13,6 +14,7 @@ let lastPositionId: number | null = null;
 let photoEyeCallback: ((positionId: number | null) => void) | null = null;
 let photoEyeMonitorRunning = false;
 let lastHealthLogMs = 0;
+let photoEyeReadInFlight: Promise<number | null> | null = null;
 
 const plcDiag = {
   connectAttempts: 0,
@@ -25,6 +27,7 @@ const plcDiag = {
   readAttempts: 0,
   readSuccess: 0,
   readErrors: 0,
+  readTimeouts: 0,
   consecutiveReadFailures: 0,
   slowReads: 0,
   maxReadMs: 0,
@@ -58,11 +61,43 @@ function logPlcHealth(reason: string): void {
       : 0;
 
   console.log(
-    `[plc][diag] ${reason} open=${socketOpen} monitor=${photoEyeMonitorRunning} reads=${plcDiag.readSuccess}/${plcDiag.readAttempts} readErr=${plcDiag.readErrors} consecutiveFail=${plcDiag.consecutiveReadFailures} slowReads=${plcDiag.slowReads} maxReadMs=${plcDiag.maxReadMs} inFlightSec=${inFlightSec} reconnects=${plcDiag.reconnects} connect=${plcDiag.connectSuccess}/${plcDiag.connectAttempts} connectFail=${plcDiag.connectFailures} lastReadOk=${formatAgo(plcDiag.lastReadOkAtMs)} lastReadErr=${formatAgo(plcDiag.lastReadErrorAtMs)} lastConnectOk=${formatAgo(plcDiag.lastConnectOkAtMs)} lastTick=${formatAgo(plcDiag.lastTickAtMs)}`
+    `[plc][diag] ${reason} open=${socketOpen} monitor=${photoEyeMonitorRunning} reads=${plcDiag.readSuccess}/${plcDiag.readAttempts} readErr=${plcDiag.readErrors} readTimeout=${plcDiag.readTimeouts} consecutiveFail=${plcDiag.consecutiveReadFailures} slowReads=${plcDiag.slowReads} maxReadMs=${plcDiag.maxReadMs} inFlightSec=${inFlightSec} reconnects=${plcDiag.reconnects} connect=${plcDiag.connectSuccess}/${plcDiag.connectAttempts} connectFail=${plcDiag.connectFailures} lastReadOk=${formatAgo(plcDiag.lastReadOkAtMs)} lastReadErr=${formatAgo(plcDiag.lastReadErrorAtMs)} lastConnectOk=${formatAgo(plcDiag.lastConnectOkAtMs)} lastTick=${formatAgo(plcDiag.lastTickAtMs)}`
   );
 }
 
+class PlcReadTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`PLC read timed out after ${timeoutMs}ms`);
+    this.name = "PlcReadTimeoutError";
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new PlcReadTimeoutError(timeoutMs)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
+function closePlcClient(client: ModbusRTU | null): void {
+  if (!client) return;
+  try {
+    const closeFn = (client as unknown as { close?: () => void }).close;
+    closeFn?.call(client);
+  } catch {}
+}
+
 function resetPlc(): void {
+  closePlcClient(plc);
   plc = null;
 }
 
@@ -115,6 +150,19 @@ export async function isPhotoEyeConnected(): Promise<boolean> {
 }
 
 export async function readPhotoEye(): Promise<number | null> {
+  if (photoEyeReadInFlight) {
+    return photoEyeReadInFlight;
+  }
+
+  photoEyeReadInFlight = readPhotoEyeInternal();
+  try {
+    return await photoEyeReadInFlight;
+  } finally {
+    photoEyeReadInFlight = null;
+  }
+}
+
+async function readPhotoEyeInternal(): Promise<number | null> {
   if (!plc || !plc?.isOpen) plc = await connectPlc();
   if (!plc || !plc?.isOpen) return null;
 
@@ -123,7 +171,7 @@ export async function readPhotoEye(): Promise<number | null> {
   plcDiag.readAttempts += 1;
 
   try {
-    const result = await plc.readHoldingRegisters(0x0000, 1);
+    const result = await withTimeout(plc.readHoldingRegisters(0x0000, 1), PLC_READ_TIMEOUT_MS);
     const elapsedMs = Date.now() - startedAt;
     plcDiag.maxReadMs = Math.max(plcDiag.maxReadMs, elapsedMs);
     if (elapsedMs >= PLC_SLOW_READ_WARN_MS) {
@@ -141,9 +189,15 @@ export async function readPhotoEye(): Promise<number | null> {
     plcDiag.readErrors += 1;
     plcDiag.consecutiveReadFailures += 1;
     plcDiag.lastReadErrorAtMs = Date.now();
-    console.error("[plc] Modbus read error:", err);
+    if (err instanceof PlcReadTimeoutError) {
+      plcDiag.readTimeouts += 1;
+      console.error("[plc] Modbus read timeout:", err.message);
+      logPlcHealth("read_timeout");
+    } else {
+      console.error("[plc] Modbus read error:", err);
+      logPlcHealth("read_error");
+    }
     resetPlc();
-    logPlcHealth("read_error");
     return null;
   } finally {
     plcDiag.inFlightReadStartedAtMs = 0;
@@ -185,7 +239,7 @@ export function startPhotoEyeMonitor(): void {
 
   plcDiag.monitorStarts += 1;
   photoEyeMonitorRunning = true;
-  const intervalMs = 100;
+  const intervalMs = 400;
 
   const tick = async () => {
     plcDiag.lastTickAtMs = Date.now();
