@@ -2,7 +2,7 @@ import express from "express";
 import http from "http";
 import { Server as IOServer } from "socket.io";
 import { bootstrapBackend } from "../core/bootstrap";
-import { setCredential, setPushersPurescan } from "../integrations/purescan";
+import { setCondition, setCredential, setPushersPurescan } from "../integrations/purescan";
 import { getPurescanCredential, updateProductCondition, updatePurescanCredentials } from "../persistence/purescanSettings";
 import { getDeviceSettings, updateDeviceSettings } from "../persistence/deviceSettings";
 import { getBeltSettings, updateBeltSpeed, updateDistance, updatePushers } from "../persistence/beltSettings";
@@ -124,8 +124,8 @@ export function createHttpServer(clientDir: string): {
   app.post("/api/toggle-new-used", async (req, res) => {
     try {
       const condition = req.body?.condition;
-      console.log(condition);
       updateProductCondition(condition);
+      setCondition();
       res.status(200).json({
         result: true
       });
