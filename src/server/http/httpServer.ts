@@ -1,7 +1,7 @@
 import express from "express";
 import http from "http";
 import { Server as IOServer } from "socket.io";
-import { bootstrapBackend } from "../core/bootstrap";
+import { bootstrapBackend, restartCommunications } from "../core/bootstrap";
 import { setCondition, setCredential, setPushersPurescan } from "../integrations/purescan";
 import { getPurescanCredential, updateProductCondition, updatePurescanCredentials } from "../persistence/purescanSettings";
 import { getDeviceSettings, updateDeviceSettings } from "../persistence/deviceSettings";
@@ -131,6 +131,17 @@ export function createHttpServer(clientDir: string): {
       });
     } catch (err) {
       console.error("toggle error: ", err);
+      return res.status(500).json({ result: false });
+    }
+  });
+
+  app.post("/api/live/reset-comm", async (_req, res) => {
+    try {
+      await restartCommunications();
+      const status = buildSystemStatus();
+      return res.status(200).json({ result: true, status });
+    } catch (err) {
+      console.error("Reset communication error:", err);
       return res.status(500).json({ result: false });
     }
   });

@@ -1,12 +1,12 @@
 import type { Server } from "socket.io";
 import { enqueueEvent } from "./state";
-import { setPlc, connectPhotoEye, setPushersPlc } from "../hardware/plc";
+import { setPlc, connectPhotoEye, restartPhotoEye, setPushersPlc } from "../hardware/plc";
 import { setPushersPurescan } from "../integrations/purescan";
 import { configureRuntime } from "./runtime";
 import { startIntervalTimer } from "./timer";
 import { getBeltSpeed } from "../persistence/beltSettings";
 import { connectKeyboard } from "../input/keyboard";
-import { connectCognex, setScannerSettings } from "../input/tcp";
+import { connectCognex, disconnectCognex, setScannerSettings } from "../input/tcp";
 import { getScannerSettings } from "../persistence/deviceSettings";
 import { setBeltSpeed } from "./timer";
 
@@ -33,6 +33,11 @@ function onScanned (barcode: string): void {
   enqueueEvent("barcode", barcode, nowSec());
 };
 
+function onPhotoEye(positionId: number | null): void {
+  console.log(`positionId: ${positionId}`);
+  enqueueEvent("photo_eye", positionId, nowSec());
+}
+
 export async function bootstrapBackend(io: Server): Promise<void> {
   if (bootstrapped) return;
 
@@ -50,10 +55,7 @@ export async function bootstrapBackend(io: Server): Promise<void> {
       await connectKeyboard(onScanned);
     }
 
-    await connectPhotoEye((positionId: number | null) => {
-      console.log(`positionId: ${positionId}`);
-      enqueueEvent("photo_eye", positionId, nowSec());
-    });
+    await connectPhotoEye(onPhotoEye);
 
     configureRuntime(io);
     startIntervalTimer();
@@ -62,4 +64,17 @@ export async function bootstrapBackend(io: Server): Promise<void> {
     bootstrapped = false;
     throw error;
   }
+}
+
+export async function restartCommunications(): Promise<void> {
+  setScannerMode();
+  if (scannerMode === "tcp/telnet") {
+    disconnectCognex();
+    setScannerSettings();
+    await connectCognex(onScanned);
+  } else {
+    await connectKeyboard(onScanned);
+  }
+
+  await restartPhotoEye(onPhotoEye);
 }

@@ -234,6 +234,15 @@ export async function connectPhotoEye(cb: (positionId: number | null) => void): 
   startPhotoEyeMonitor();
 }
 
+export async function restartPhotoEye(cb: (positionId: number | null) => void): Promise<void> {
+  photoEyeCallback = cb;
+  photoEyeMonitorRunning = false;
+  lastPositionId = null;
+  resetPlc();
+  lastPositionId = await readPhotoEye();
+  startPhotoEyeMonitor();
+}
+
 export function startPhotoEyeMonitor(): void {
   if (photoEyeMonitorRunning) return;
 

@@ -15,6 +15,7 @@ export function LivePage() {
   const [beltSettings, setBeltSettings] = useState<BeltSettingsType | null>(null);
   const [systemStatus, setSystemStatus] = useState<SystemStatusType | null>(null);
   const [newMode, setNewMode] = useState<boolean>(false);
+  const [resetting, setResetting] = useState<boolean>(false);
   
   const { items } = useLiveConveyor(beltSettings);
   const conveyorRef = useRef<ConveyorSystem3D | null>(null);
@@ -56,7 +57,22 @@ export function LivePage() {
     if (res.data.result) {
       setNewMode((prev) => !prev);
     }
-  }
+  };
+
+  const handleResetComm = async () => {
+    if (resetting) return;
+    setResetting(true);
+    try {
+      const res = await axios.post("/api/live/reset-comm");
+      if (res.data?.result && res.data?.status) {
+        setSystemStatus(res.data.status);
+      }
+    } catch (err: unknown) {
+      console.error("Reset communication error:", err);
+    } finally {
+      setResetting(false);
+    }
+  };
 
   return (
     <main className="w-full h-screen max-w-full p-4 max-md:w-[95%] max-md:p-6 bg-white/90 shadow-[0_25px_60px_rgba(58,122,254,0.18)] border border-[rgba(26,29,35,0.08)] grid grid-rows-[auto_1fr_auto] gap-3 overflow-hidden max-md:[&_button]:w-full">
@@ -91,6 +107,15 @@ export function LivePage() {
               />
             </span>
             <span className="text-lg font-medium text-black">New</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleResetComm}
+            disabled={resetting}
+            className="inline-flex items-center gap-2 py-2.5 px-[18px] font-semibold text-[0.95rem] rounded-xl no-underline transition-all duration-200 border-2 border-[rgba(26,29,35,0.22)] text-[#1a1d23] bg-white hover:bg-gray-100 disabled:opacity-60 disabled:cursor-not-allowed"
+            title="Restart PLC and scanner communication"
+          >
+            {resetting ? "Resetting..." : "Reset Comm"}
           </button>
           <StatusBar status={systemStatus} />
         </div>
