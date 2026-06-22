@@ -1,6 +1,7 @@
 export const PUSHER_LABEL_OPTIONS = [
   "FBA",
   "MF",
+  "ThriftBooks",
   "Reject Blu-ray",
   "Reject Book",
   "Reject Music",

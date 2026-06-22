@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios, { type AxiosResponse } from "axios";
 import { getPurescanUrls } from "../persistence/purescanSettings";
 import { getPushers } from "../persistence/beltSettings";
 import { getProductCondition } from "../persistence/purescanSettings";
@@ -15,6 +15,7 @@ let credential: { email: string; password: string } | null = null;
 let condition: boolean = false;
 let loginUrl: string | null = null;
 let dataUrl: string | null = null;
+let thriftBooksUrl: string | null = null;
 
 export function setCondition(): void {
   condition = getProductCondition();
@@ -29,6 +30,7 @@ export function resolvedPurescan(): void {
   const urls = getPurescanUrls();
   loginUrl = urls.login_url;
   dataUrl = urls.data_url;
+  thriftBooksUrl = urls.thriftbooks_url;
 }
 
 export function setPushersPurescan(): void {
@@ -85,20 +87,26 @@ function getPusherNumber(label: string): { pusher: number; label?: string; dista
   return null;
 }
 
-function labelFromPurescanResponse(productData: Record<string, unknown>): string {
-  if (!productData.result) {
+function labelFromPurescanResponse(productData: Record<string, unknown>, thriftData: Record<string, unknown>): string {
+  if (!productData.result && !thriftData.result) {
     return "Extra";
   }
   const scanResult = (productData.scanResult as Record<string, unknown>) || {};
   const product = (scanResult.product as Record<string, unknown>) || {};
   const fba = (scanResult.fba as Record<string, unknown>) || {};
   const mf = (scanResult.mf as Record<string, unknown>) || {};
+  const quotePrice = thriftData.quotePrice as number;
+  const handicap = thriftData.handicap as number;
 
-  if (fba.accept === true) {
-    return "FBA";
+  if (fba?.accept) {
+    const profit = fba?.profit as number ?? 0;
+    if (quotePrice + handicap > profit) return "ThriftBooks";
+    else return "FBA";
   }
-  if (mf.accept === true) {
-    return "MF";
+  if (mf?.accept) {
+    const profit = mf?.profit as number ?? 0;
+    if (quotePrice + handicap > profit) return "ThriftBooks";
+    else return "MF";
   }
   const category = product.category as string | undefined;
   if (
@@ -131,37 +139,62 @@ async function refreshTokenOnce(): Promise<boolean> {
   }
 }
 
+function authHeaders(bearer: string) {
+  return { Authorization: `Bearer ${bearer}` };
+}
+
+function thriftScanData(res: AxiosResponse | null): Record<string, unknown> {
+  if (res?.status === 200 && res.data && typeof res.data === "object") {
+    return res.data as Record<string, unknown>;
+  }
+  return {};
+}
+
+function resultFromScanResponse(scanData: Record<string, unknown>, thriftData: Record<string, unknown>) {
+  const label = labelFromPurescanResponse(scanData, thriftData);
+  return getPusherNumber(label) ?? { reason: "No Label" };
+}
+
 export async function requestPurescan(barcode: string): Promise<{ pusher: number; label?: string; distance?: number } | { reason: string }> {
   if (!dataUrl) {
     return { reason: "Url not set" };
   }
 
-  const scanUrl = dataUrl;
+  if(!thriftBooksUrl) {
+    return { reason: "Thrift Books Url not set"}
+  }
 
-  let auth = token;
+  const scanUrl = dataUrl;
+  const thriftUrl = thriftBooksUrl;
+
+  const auth = token;
   if (!auth) {
     console.warn(`No token available for barcode ${barcode}`);
     return { reason: "No Token" };
   }
 
-  const postOnce = async (bearer: string) => {
-    return await axios.post(
+  const requestOptions = { timeout: PURESCAN_REQUEST_TIMEOUT_MS };
+
+  const fetchBoth = (bearer: string): Promise<[AxiosResponse, AxiosResponse]> => {
+    const scanRequest = axios.post(
       scanUrl,
-      { barcode: barcode, condition: condition },
-      {
-        timeout: PURESCAN_REQUEST_TIMEOUT_MS,
-        headers: {
-          Authorization: `Bearer ${bearer}`
-        }
-      }
+      { barcode, condition },
+      { ...requestOptions, headers: authHeaders(bearer) }
     );
+
+    const thriftRequest = axios.post(
+      thriftUrl,
+      { barcode },
+      { ...requestOptions, headers: authHeaders(bearer) }
+    );
+
+    return Promise.all([scanRequest, thriftRequest]);
   };
 
   try {
-    let res = await postOnce(auth);
-    if (res.status === 200) {
-      const label = labelFromPurescanResponse(res.data);
-      return getPusherNumber(label) ?? { reason: "No Label" };
+    const [scanRes, thriftRes] = await fetchBoth(auth);
+    if (scanRes.status === 200 && thriftRes.status === 200) {
+      return resultFromScanResponse(scanRes.data, thriftRes.data);
     }
     return { reason: "No response" };
   } catch (e: any) {
@@ -171,19 +204,24 @@ export async function requestPurescan(barcode: string): Promise<{ pusher: number
         token = null;
         const ok = await refreshTokenOnce();
         if (ok && token) {
-          const res = await postOnce(token);
-          if (res.status === 200) {
-            const label = labelFromPurescanResponse(res.data);
-            return getPusherNumber(label) ?? { reason: "No Label"};
+          try {
+            const [scanRes, thriftBooksRes] = await fetchBoth(token);
+            if (scanRes.status === 200) {
+              return resultFromScanResponse(scanRes.data, thriftScanData(thriftBooksRes));
+            }
+          } catch (retryErr: any) {
+            e = retryErr;
           }
-        } else return { reason: "No Token" };
+        } else {
+          return { reason: "No Token" };
+        }
       }
       if (e.response.status === 404) {
-        console.warn(`Purescan 404 for ${barcode}: ${e.response.data.error}`);
+        console.warn(`Purescan 404 for ${barcode}: ${e.response.data?.error}`);
         return getPusherNumber("Extra") ?? { reason: "Not Found" };
       }
       if (e.response.status === 500) {
-        console.warn(`Purescan 500 for ${barcode}: ${e.response.data.error}`);
+        console.warn(`Purescan 500 for ${barcode}: ${e.response.data?.error}`);
       }
     }
     return { reason: "No response" };
