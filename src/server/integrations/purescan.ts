@@ -175,12 +175,20 @@ export async function requestPurescan(barcode: string): Promise<{ pusher: number
 
   const requestOptions = { timeout: PURESCAN_REQUEST_TIMEOUT_MS };
 
-  const fetchBoth = (bearer: string): Promise<[AxiosResponse, AxiosResponse]> => {
+  let notFound: boolean = false;
+
+  const fetchBoth = (bearer: string): Promise<[AxiosResponse | null, AxiosResponse]> => {
     const scanRequest = axios.post(
       scanUrl,
       { barcode, condition },
       { ...requestOptions, headers: authHeaders(bearer) }
-    );
+    ).catch(err => {
+        if(err.response.status === 404) {
+            notFound = true;
+            return null;
+        }
+        else throw err; 
+    });
 
     const thriftRequest = axios.post(
       thriftUrl,
@@ -193,9 +201,25 @@ export async function requestPurescan(barcode: string): Promise<{ pusher: number
 
   try {
     const [scanRes, thriftRes] = await fetchBoth(auth);
-    if (scanRes.status === 200 && thriftRes.status === 200) {
+
+    let quotePrice: number = 0;
+    let handicap: number = 0;
+    
+    if(thriftRes.data.result) {
+      quotePrice = thriftRes.data.quotePrice;
+      handicap = thriftRes.data.handicap;
+    }
+
+    if(notFound) {
+        if(quotePrice + handicap > 0) {
+            return getPusherNumber("ThriftBooks") ?? { reason: "No Label" };
+        } else throw new Error('not found');
+    }
+
+    if (scanRes?.status === 200 && thriftRes.status === 200) {
       return resultFromScanResponse(scanRes.data, thriftRes.data);
     }
+    
     return { reason: "No response" };
   } catch (e: any) {
     if (e.response) {
@@ -206,7 +230,7 @@ export async function requestPurescan(barcode: string): Promise<{ pusher: number
         if (ok && token) {
           try {
             const [scanRes, thriftBooksRes] = await fetchBoth(token);
-            if (scanRes.status === 200) {
+            if (scanRes?.status === 200) {
               return resultFromScanResponse(scanRes.data, thriftScanData(thriftBooksRes));
             }
           } catch (retryErr: any) {
